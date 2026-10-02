@@ -14,6 +14,7 @@
   let busy = false;
   let samples = loadSamples();
   let pendingProxies = {};
+  let inspectedRepo = null;
 
   function setConnection(state, message) {
     connection.className = `connection ${state ? `is-${state}` : ''}`;
@@ -241,7 +242,7 @@
     const parts = url.pathname.replace(/\/$/, '').split('/').filter(Boolean);
     if (parts.length !== 2 || !/^[\w.-]+$/.test(parts[0]) || !/^[\w.-]+$/.test(parts[1].replace(/\.git$/, ''))) throw new Error('Use github.com/owner/repository.');
     const repo = parts[1].replace(/\.git$/, '');
-    return { repo, url: `https://github.com/${parts[0]}/${repo}.git` };
+    return { owner: parts[0], repo, url: `https://github.com/${parts[0]}/${repo}.git` };
   }
   function slug(value) { return value.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50); }
   function parsePorts(value) {
@@ -258,6 +259,8 @@
   }
   function deploymentInputs() {
     const repo = parseRepo($('#github-url').value);
+    const requestedBranch = $('#github-branch').value.trim();
+    if (!inspectedRepo || inspectedRepo.url !== repo.url || inspectedRepo.branch !== requestedBranch) throw new Error('Inspect this repository and branch before previewing the deployment.');
     const branch = $('#github-branch').value.trim();
     if (!/^[A-Za-z0-9._/-]{1,63}$/.test(branch) || branch.includes('..') || branch.startsWith('/') || branch.endsWith('/')) throw new Error('Enter a valid Git branch name.');
     const name = $('#deployment-name').value.trim().toLowerCase();
@@ -265,10 +268,14 @@
     const ports = parsePorts($('#deploy-ports').value);
     if (!ports.length) throw new Error('Add at least one published host:guest port mapping.');
     if (!$('#deploy-ack').checked) throw new Error('Confirm that you trust this repository before continuing.');
+    const choice = $('#deploy-layout').value;
+    const layout = choice === 'auto' ? inspectedRepo.layout : choice;
+    if (layout === 'compose' && !inspectedRepo.files.some(file => ['compose.yaml', 'compose.yml', 'docker-compose.yml', 'docker-compose.yaml'].includes(file))) throw new Error('No root-level Compose file was detected in this repository branch.');
+    if (layout === 'dockerfile' && !inspectedRepo.files.includes('Dockerfile')) throw new Error('No root-level Dockerfile was detected in this repository branch.');
     const hostname = $('#deploy-hostname').value.trim().toLowerCase();
     if (hostname && (!/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(hostname))) throw new Error('Enter a valid hostname such as app.example.com.');
     if (hostname && ports.length !== 1) throw new Error('Use one published port per service hostname. Add separate hostnames for additional services.');
-    return { ...repo, branch, name, ports, hostname, layout: $('#deploy-layout').value };
+    return { ...repo, branch, name, ports, hostname, layout, files: inspectedRepo.files };
   }
   function cloudConfig(input) {
     const steps = [
@@ -279,6 +286,49 @@
         : ['bash', '-lc', `cd /opt/app && docker build -t incus-app . && docker run -d --restart unless-stopped -p 0.0.0.0:${input.ports[0].guest}:${input.ports[0].guest} --name incus-app incus-app`],
     ];
     return `#cloud-config\npackage_update: true\npackages:\n  - git\n  - docker.io\n  - docker-compose-v2\nruncmd:\n${steps.map(step => `  - [${step.map(value => JSON.stringify(value)).join(', ')}]`).join('\n')}\n`;
+  }
+  async function inspectRepo() {
+    const status = $('#repo-inspect-status');
+    try {
+      const repo = parseRepo($('#github-url').value);
+      let branch = $('#github-branch').value.trim();
+      if (!/^[A-Za-z0-9._/-]{1,63}$/.test(branch) || branch.includes('..') || branch.startsWith('/') || branch.endsWith('/')) throw new Error('Enter a valid Git branch name first.');
+      inspectedRepo = null;
+      $('#deploy-run').disabled = true;
+      status.className = 'repo-inspect-status';
+      status.textContent = 'Checking public GitHub repository…';
+      $('#repo-inspect').disabled = true;
+      const api = `https://api.github.com/repos/${repo.owner}/${repo.repo}`;
+      const headers = ['-H', 'Accept: application/vnd.github+json', '-H', 'X-GitHub-Api-Version: 2022-11-28'];
+      const metadata = JSON.parse(await cockpit.spawn(['curl', '-fsSL', '--max-time', '15', ...headers, api], { err: 'message' }));
+      if (branch === 'main' && metadata.default_branch && metadata.default_branch !== 'main') {
+        branch = metadata.default_branch;
+        $('#github-branch').value = branch;
+      }
+      const contents = JSON.parse(await cockpit.spawn(['curl', '-fsSL', '--max-time', '15', ...headers, `${api}/contents?ref=${encodeURIComponent(branch)}`], { err: 'message' }));
+      if (!Array.isArray(contents)) throw new Error('GitHub did not return the repository root file listing. Check the branch name.');
+      const files = contents.filter(file => file.type === 'file').map(file => file.name);
+      const composeFiles = ['compose.yaml', 'compose.yml', 'docker-compose.yml', 'docker-compose.yaml'];
+      const layout = composeFiles.some(file => files.includes(file)) ? 'compose' : files.includes('Dockerfile') ? 'dockerfile' : '';
+      if (!layout) throw new Error('No supported root deployment file found. Add a Dockerfile or Docker Compose file at the repository root.');
+      inspectedRepo = { url: repo.url, branch, layout, files };
+      $('#deploy-layout').value = 'auto';
+      status.className = 'repo-inspect-status is-ready';
+      status.textContent = `${layout === 'compose' ? 'Docker Compose stack' : 'Dockerfile application'} detected · ${layout === 'compose' ? 'Compose services will run together in one VM.' : 'App will run in one VM.'}`;
+      $('#deploy-run').disabled = true;
+      $('#deploy-plan').hidden = true;
+    } catch (error) {
+      inspectedRepo = null;
+      status.className = 'repo-inspect-status is-error';
+      status.textContent = error.message || 'Could not inspect the GitHub repository.';
+    } finally { $('#repo-inspect').disabled = false; }
+  }
+  function invalidateInspection() {
+    inspectedRepo = null;
+    $('#repo-inspect-status').className = 'repo-inspect-status';
+    $('#repo-inspect-status').textContent = 'Repository or branch changed · inspect again before deploying.';
+    $('#deploy-run').disabled = true;
+    $('#deploy-plan').hidden = true;
   }
   function showDeployPreview() {
     try {
@@ -294,7 +344,8 @@
       $('#deploy-plan').hidden = false; $('#deploy-error').hidden = true; $('#deploy-run').disabled = false;
     } catch (error) { $('#deploy-error').textContent = error.message; $('#deploy-error').hidden = false; $('#deploy-run').disabled = true; }
   }
-  async function deployProject() {
+  async function deployProject(event) {
+    event?.preventDefault();
     if (busy || $('#deploy-run').disabled) return;
     let input; try { input = deploymentInputs(); } catch (error) { $('#deploy-error').textContent = error.message; $('#deploy-error').hidden = false; return; }
     const args = [
@@ -336,9 +387,10 @@
   $('#deploy-cancel').addEventListener('click', closeDeploy);
   $('#deploy-preview').addEventListener('click', showDeployPreview);
   $('#deploy-back').addEventListener('click', () => { $('#deploy-plan').hidden = true; $('#deploy-run').disabled = true; });
-  $('#deploy-run').addEventListener('click', deployProject);
-  $('#github-url').addEventListener('change', updateName);
-  $('#github-url').addEventListener('blur', updateName);
+  $('#deploy-form').addEventListener('submit', deployProject);
+  $('#repo-inspect').addEventListener('click', inspectRepo);
+  $('#github-url').addEventListener('input', () => { updateName(); invalidateInspection(); });
+  $('#github-branch').addEventListener('input', invalidateInspection);
   $('#refresh').addEventListener('click', () => refresh());
   filter.addEventListener('input', render);
   $('#traffic-window').addEventListener('change', renderTraffic);

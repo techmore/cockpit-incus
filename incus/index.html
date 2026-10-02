@@ -66,17 +66,17 @@
     <form id="deploy-form" method="dialog">
       <div class="dialog-head"><div><span class="eyebrow">DEPLOYMENT WIZARD · PREVIEW BEFORE RUNNING</span><h2>Deploy a GitHub project</h2></div><button type="button" class="dialog-close deploy-close" aria-label="Close">×</button></div>
       <div class="deploy-body">
-        <label class="field-wide">Public GitHub repository URL<input id="github-url" type="url" required placeholder="https://github.com/owner/repository" autocomplete="url"></label>
+        <label class="field-wide">Public GitHub repository URL<div class="repo-input-row"><input id="github-url" type="url" required placeholder="https://github.com/owner/repository" autocomplete="url"><button type="button" id="repo-inspect" class="button button-quiet">Inspect repo</button></div><small id="repo-inspect-status" class="repo-inspect-status">Inspect finds a root Dockerfile or Compose stack and chooses the deployment path.</small></label>
         <div class="deploy-fields"><label>Branch<input id="github-branch" value="main" maxlength="63" pattern="[A-Za-z0-9._/-]+" required></label><label>Deployment name<input id="deployment-name" maxlength="50" pattern="[a-zA-Z0-9][a-zA-Z0-9-]{0,49}" required></label></div>
         <label class="field-wide">Service hostname <small>Optional · DNS and Caddy route are still yours to configure</small><input id="deploy-hostname" placeholder="app.example.com" autocomplete="url"></label>
-        <label class="field-wide">Project layout<select id="deploy-layout"><option value="compose">Docker Compose stack · multiple services in one VM</option><option value="dockerfile">Dockerfile app · single container inside one VM</option></select></label>
+        <label class="field-wide">Project layout<select id="deploy-layout"><option value="auto">Auto-detect from repository</option><option value="compose">Docker Compose stack · multiple services in one VM</option><option value="dockerfile">Dockerfile app · single container inside one VM</option></select></label>
         <label class="field-wide">Published ports <small>Host port:guest port, comma separated · e.g. 18080:8080,18443:8443</small><input id="deploy-ports" value="18080:8080" placeholder="18080:8080" autocomplete="off"></label>
         <div class="url-preview"><b>Private by default</b><span>Incus will bind these host ports to 127.0.0.1 only. Add a Caddy route to publish a hostname. The wizard will show the generated plan before creating anything.</span></div>
         <label class="acknowledge"><input id="deploy-ack" type="checkbox" required><span>I trust this repository’s build scripts and want to run them inside a new VM.</span></label>
         <div id="deploy-plan" class="deploy-plan" hidden><div class="plan-head"><b>Review deployment plan</b><button type="button" id="deploy-back" class="action">Edit inputs</button></div><pre id="deploy-plan-text"></pre></div>
         <div id="deploy-error" class="deploy-error" role="alert" hidden></div>
       </div>
-      <div class="dialog-actions"><button type="button" id="deploy-cancel" class="button button-quiet">Cancel</button><button type="button" id="deploy-preview" class="button button-quiet">Preview plan</button><button type="button" id="deploy-run" class="button button-primary" disabled>Deploy project <span aria-hidden="true">→</span></button></div>
+      <div class="dialog-actions"><button type="button" id="deploy-cancel" class="button button-quiet">Cancel</button><button type="button" id="deploy-preview" class="button button-quiet">Preview plan</button><button type="submit" id="deploy-run" class="button button-primary" disabled>Deploy project <span aria-hidden="true">→</span></button></div>
     </form>
   </dialog>
 

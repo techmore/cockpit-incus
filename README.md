@@ -7,7 +7,7 @@ A Cockpit package for managing Incus instances on the Cockpit host. It uses the 
 - Live instance list with state, type, IPv4, published proxy ports, and deployment-group tags
 - Start, stop, inspect, and timestamped snapshot actions
 - Launch Debian, Ubuntu, and Alpine containers or virtual machines
-- Import a public GitHub repository as a Dockerfile application or root-level Docker Compose stack inside an isolated Ubuntu VM
+- Inspect a public GitHub repository and auto-detect a root Dockerfile or Compose stack, then deploy it inside an isolated Ubuntu VM
 - Preview the generated cloud-init plan before launch; deployment code runs only after a trust confirmation
 - Tag deployment VMs with `user.cockpit-incus.deployment`, and keep source, branch, and layout as instance metadata
 - Map chosen guest ports to host loopback only; provide an optional hostname plus a Caddy reverse-proxy snippet for the operator to configure
@@ -19,7 +19,7 @@ Incus exposes cumulative per-instance NIC counters. The module turns differences
 
 HTTP request totals are not currently collected. The host's Caddy configuration has no HTTP access-log source to query; network byte counters cannot determine request counts. A future access-log adapter needs an enabled Caddy JSON log source and a controlled, read-only path from the Cockpit session.
 
-GitHub deployments currently support public HTTPS repositories with a Dockerfile at repository root, or a Compose file at repository root. Private repositories, monorepo subdirectories, arbitrary buildpacks, automatic DNS edits, and automatic Caddy edits are not supported yet. The wizard intentionally launches one Ubuntu VM per deployment; Compose services run together inside that VM and carry one deployment tag. Proxy listeners bind to host loopback only. Review repository build scripts before approving them.
+GitHub deployments currently support public HTTPS repositories with a Dockerfile at repository root, or a Compose file at repository root. Private repositories, monorepo subdirectories, arbitrary buildpacks, automatic DNS edits, and automatic Caddy edits are not supported yet. Detection uses GitHub’s public repository and contents APIs, so the Cockpit host needs outbound access to `api.github.com`. The wizard intentionally launches one Ubuntu VM per deployment; Compose services run together inside that VM and carry one deployment tag. Proxy listeners bind to host loopback only. Review repository build scripts before approving them.
 
 The module does not delete instances, enable privileged Incus containers, publish ports on all host interfaces, or configure host mounts.
 
