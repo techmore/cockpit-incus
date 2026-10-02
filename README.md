@@ -5,6 +5,7 @@ A Cockpit package for managing Incus instances on the Cockpit host. It uses the 
 ## Current features
 
 - Live instance list with state, type, IPv4, configured CPU and memory limits, root-disk size, profile, published proxy ports, and deployment-group tags
+- Live CPU average since the previous poll, five-minute average RAM use, and root filesystem file use sampled every five minutes; disk percentages compare use with the configured root size and are estimates unless the storage backend enforces that size
 - Per-instance configuration details for profiles, base image, architecture, storage pool, additional devices, and current memory use
 - Start, stop, inspect, and timestamped snapshot actions
 - Launch Debian, Ubuntu, and Alpine containers or virtual machines

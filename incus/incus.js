@@ -9,12 +9,16 @@
   const deployDialog = $('#deploy-dialog');
   const historyKey = 'cockpit-incus-traffic-v1';
   const pollEvery = 30_000;
+  const diskPollEvery = 5 * 60_000;
   const retention = 24 * 60 * 60 * 1000;
   let instances = [];
   let busy = false;
   let samples = loadSamples();
   let pendingProxies = {};
   let inspectedRepo = null;
+  const cpuBaselines = new Map();
+  const memorySamples = new Map();
+  let lastDiskPoll = 0;
 
   function setConnection(state, message) {
     connection.className = `connection ${state ? `is-${state}` : ''}`;
@@ -72,6 +76,95 @@
       memoryTotal: item.state?.memory?.total,
       devices: Object.entries(devices).map(([name, device]) => ({ name, ...device })),
     };
+  }
+  function capacityBytes(value) {
+    const match = String(value || '').trim().match(/^([\d.]+)\s*([KMGTPE]?i?B)?$/i);
+    if (!match) return 0;
+    const units = { b: 1, kb: 1e3, mb: 1e6, gb: 1e9, tb: 1e12, kib: 1024, mib: 1024 ** 2, gib: 1024 ** 3, tib: 1024 ** 4 };
+    return Number(match[1]) * (units[(match[2] || 'b').toLowerCase()] || 1);
+  }
+  function cpuLimitCount(item) {
+    const value = String(item.specs.cpu || '');
+    if (/^\d+(?:\.\d+)?$/.test(value)) return Number(value);
+    if (/^\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*$/.test(value)) return value.split(',').reduce((count, part) => {
+      const [start, end = start] = part.split('-').map(Number);
+      return count + end - start + 1;
+    }, 0);
+    return 0;
+  }
+  function updateCpuMetrics() {
+    const now = Date.now();
+    instances.forEach(item => {
+      item.live ||= {};
+      const usage = Number(item.raw.state?.cpu?.usage);
+      const previous = cpuBaselines.get(item.name);
+      item.live.cpuPercent = null;
+      item.live.cpuCores = null;
+      const memoryUsage = Number(item.raw.state?.memory?.usage);
+      const memoryTotal = Number(item.raw.state?.memory?.total);
+      if (item.status.toLowerCase() === 'running' && memoryTotal > 0 && Number.isFinite(memoryUsage)) {
+        const history = memorySamples.get(item.name) || [];
+        history.push({ t: now, percent: memoryUsage / memoryTotal * 100 });
+        const recent = history.filter(sample => sample.t >= now - 5 * 60_000);
+        memorySamples.set(item.name, recent);
+        item.live.memoryPercentAverage = recent.reduce((sum, sample) => sum + sample.percent, 0) / recent.length;
+      } else {
+        memorySamples.delete(item.name);
+        item.live.memoryPercentAverage = null;
+      }
+      if (item.status.toLowerCase() === 'running' && Number.isFinite(usage)) {
+        if (previous && now > previous.t && usage >= previous.usage) {
+          const cores = (usage - previous.usage) / ((now - previous.t) * 1e6);
+          const cpuCount = cpuLimitCount(item);
+          item.live.cpuCores = cores;
+          item.live.cpuPercent = cpuCount ? Math.min(100, (cores / cpuCount) * 100) : cores * 100;
+        }
+        cpuBaselines.set(item.name, { usage, t: now });
+      } else cpuBaselines.delete(item.name);
+    });
+  }
+  async function sampleDiskUsage() {
+    const now = Date.now();
+    if (now - lastDiskPoll < diskPollEvery) return;
+    lastDiskPoll = now;
+    const running = instances.filter(item => item.status.toLowerCase() === 'running');
+    await Promise.allSettled(running.map(async item => {
+      try {
+        const output = await runIncus(['exec', item.name, '--', 'du', '-sx', '-B1', '/']);
+        const bytes = Number(String(output).trim().split(/\s+/)[0]);
+        const current = instances.find(entry => entry.name === item.name);
+        if (current && Number.isFinite(bytes)) { current.live.diskBytes = bytes; current.live.diskError = false; }
+      } catch {
+        const current = instances.find(entry => entry.name === item.name);
+        if (current) { current.live.diskBytes = null; current.live.diskError = true; }
+      }
+    }));
+    render();
+  }
+  function liveLoadCell(item) {
+    const cell = document.createElement('td'); cell.className = 'live-load-cell';
+    const memoryUsage = Number(item.raw.state?.memory?.usage);
+    const memoryTotal = Number(item.raw.state?.memory?.total);
+    const memoryPercent = Number.isFinite(item.live?.memoryPercentAverage) ? Math.min(100, item.live.memoryPercentAverage) : null;
+    const cpu = document.createElement('span'); cpu.className = 'load-value';
+    if (item.status.toLowerCase() !== 'running') cpu.textContent = 'CPU · stopped';
+    else if (Number.isFinite(item.live?.cpuCores)) {
+      cpu.textContent = cpuLimitCount(item) ? `CPU · ${item.live.cpuPercent.toFixed(1)}% avg` : `CPU · ${item.live.cpuCores.toFixed(2)} cores avg`;
+      cpu.title = cpuLimitCount(item) ? 'Average use as a percentage of this instance’s configured CPU limit' : 'Average CPU cores used; this instance has no explicit CPU limit';
+    }
+    else cpu.textContent = 'CPU · sampling…';
+    const ram = document.createElement('span'); ram.className = 'load-value';
+    ram.textContent = item.status.toLowerCase() !== 'running' ? 'RAM · stopped' : Number.isFinite(memoryPercent) ? `RAM · ${memoryPercent.toFixed(0)}% avg` : 'RAM · sampling…';
+    if (Number.isFinite(memoryPercent)) ram.title = `Current: ${formatBytes(memoryUsage)} of ${formatBytes(memoryTotal)} · average of samples from the last 5 minutes`;
+    const disk = document.createElement('span'); disk.className = 'load-value';
+    if (Number.isFinite(item.live?.diskBytes)) {
+      const capacity = capacityBytes(item.specs.disk);
+      const percent = capacity > 0 ? ` · ${(item.live.diskBytes / capacity * 100).toFixed(0)}% of configured size` : '';
+      disk.textContent = `Disk · ${formatBytes(item.live.diskBytes)}${percent}`;
+      disk.title = capacity > 0 ? 'Root filesystem files compared with the configured root disk size' : 'Root filesystem file usage; no configured disk capacity to calculate a percentage';
+    } else disk.textContent = item.status.toLowerCase() !== 'running' ? 'Disk · stopped' : item.live?.diskError ? 'Disk · unavailable' : 'Disk · sampling…';
+    cell.append(cpu, ram, disk);
+    return cell;
   }
   function networkCounters(item) {
     const totals = { received: 0, sent: 0 };
@@ -191,6 +284,7 @@
       const disk = document.createElement('span'); disk.className = 'spec-value'; disk.textContent = `Disk · ${item.specs.disk}`;
       const profile = document.createElement('small'); profile.className = 'spec-profile'; profile.textContent = `Profile · ${item.specs.profiles}`;
       specsCell.append(cpu, memory, disk, profile);
+      const loadCell = liveLoadCell(item);
       const ipCell = document.createElement('td'); ipCell.className = 'ip'; ipCell.textContent = item.ipv4 || '—';
       const portsCell = document.createElement('td'); portsCell.className = 'ports-cell';
       if (item.ports.length) item.ports.forEach(port => {
@@ -202,7 +296,7 @@
       actions.append(makeAction('Inspect', inspectInstance, item));
       if (status === 'running') { actions.append(makeAction('Snapshot', snapshotInstance, item)); actions.append(makeAction('Stop', changeState, item, 'action-danger')); }
       else if (status === 'stopped') actions.append(makeAction('Start', changeState, item));
-      actionCell.append(actions); row.append(nameCell, stateCell, typeCell, specsCell, ipCell, portsCell, actionCell); instanceBody.append(row);
+      actionCell.append(actions); row.append(nameCell, stateCell, typeCell, specsCell, loadCell, ipCell, portsCell, actionCell); instanceBody.append(row);
     });
   }
   async function refresh({ sample = true } = {}) {
@@ -211,8 +305,10 @@
       const parsed = parseJson(await runIncus(['list', '--format=json']), null);
       if (!Array.isArray(parsed)) throw new Error('Incus returned an unexpected instance list.');
       instances = parsed.map(normalizeInstance).filter(item => item.name);
+      updateCpuMetrics();
       updateStats(); render(); setConnection('online', 'Connected to Incus');
       if (sample) recordTraffic();
+      void sampleDiskUsage();
       await installPendingProxies();
     } catch (error) {
       setConnection('error', 'Incus unavailable');
