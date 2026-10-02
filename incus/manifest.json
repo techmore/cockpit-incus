@@ -1,0 +1,16 @@
+{
+  "version": 0,
+  "menu": {
+    "incus": {
+      "label": "Incus",
+      "order": 55,
+      "path": "index.html",
+      "keywords": [
+        {
+          "matches": ["incus", "containers", "virtual machines", "instances"],
+          "weight": 10
+        }
+      ]
+    }
+  }
+}

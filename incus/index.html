@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Incus</title>
+  <link rel="stylesheet" href="incus.css">
+  <script src="../base1/cockpit.js"></script>
+  <script src="incus.js" defer></script>
+</head>
+<body>
+  <main class="page">
+    <header class="topbar">
+      <div class="title-lockup"><span class="brand-mark" aria-hidden="true">I</span><div><p class="eyebrow">SYSTEMS · CONTAINERS & VIRTUAL MACHINES</p><h1>Incus</h1></div></div>
+      <button id="refresh" class="button button-quiet" type="button"><span aria-hidden="true">↻</span> Refresh</button>
+    </header>
+
+    <section class="intro-row">
+      <div><h2>Your instances, at a glance.</h2><p>Manage the Incus instances on this host with your Cockpit account.</p></div>
+      <span id="connection" class="connection"><i></i><span>Connecting to Incus…</span></span>
+    </section>
+
+    <section class="stats" aria-label="Instance totals">
+      <article class="stat"><span>Instances</span><b id="stat-total">—</b></article>
+      <article class="stat"><span>Running</span><b id="stat-running">—</b></article>
+      <article class="stat"><span>Stopped</span><b id="stat-stopped">—</b></article>
+      <article class="stat"><span>Virtual machines</span><b id="stat-vms">—</b></article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading instance-heading"><div><h2>Instances</h2><p>Start, stop, inspect, or snapshot an instance.</p></div><label class="search"><span class="sr-only">Filter instances</span><input id="filter" type="search" placeholder="Filter by name…" autocomplete="off"></label></div>
+      <div id="notice" class="notice" role="status" hidden></div>
+      <div id="empty" class="empty" hidden><span class="empty-mark">◇</span><b>No Incus instances yet</b><p>Launch your first container or virtual machine below.</p></div>
+      <div class="table-scroll"><table><thead><tr><th>Name</th><th>State</th><th>Type</th><th>IPv4</th><th class="actions-head">Actions</th></tr></thead><tbody id="instances"></tbody></table></div>
+      <p id="no-match" class="no-match" hidden>No instances match that filter.</p>
+    </section>
+
+    <section class="panel launch-panel">
+      <div class="panel-heading"><div><span class="eyebrow">QUICK START</span><h2>Launch an instance</h2><p>Uses your host’s default Incus profile and network.</p></div></div>
+      <form id="launch-form" class="launch-form">
+        <label>Instance name<input id="instance-name" name="name" required maxlength="63" pattern="[a-zA-Z0-9][a-zA-Z0-9-]{0,62}" placeholder="e.g. docs-server" autocomplete="off"></label>
+        <label>Image<select id="image"><option value="images:debian/12">Debian 12</option><option value="images:ubuntu/24.04">Ubuntu 24.04</option><option value="images:alpine/3.20">Alpine 3.20</option></select></label>
+        <label>Instance type<select id="instance-type"><option value="container">Container</option><option value="virtual-machine">Virtual machine</option></select></label>
+        <button id="launch" class="button button-primary" type="submit">Launch instance <span aria-hidden="true">→</span></button>
+      </form>
+      <p class="form-note">Creates an unprivileged container or VM with the standard profile. No host mounts or privileged settings are added.</p>
+    </section>
+
+    <details class="help"><summary>How this module accesses Incus</summary><p>This page runs inside Cockpit and calls the <code>incus</code> command through Cockpit’s process bridge. Commands run as the signed-in host account. The account needs permission to access Incus; use your normal administrator workflow to grant it. The module does not send host credentials to an external service.</p></details>
+    <footer>cockpit-incus <span>·</span> Local host management</footer>
+  </main>
+
+  <dialog id="inspect-dialog" class="inspect-dialog"><div class="dialog-head"><div><span class="eyebrow">INSTANCE DETAILS</span><h2 id="inspect-title">Instance</h2></div><button type="button" class="dialog-close" aria-label="Close">×</button></div><pre id="inspect-output"></pre></dialog>
+</body>
+</html>
