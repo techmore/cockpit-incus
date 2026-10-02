@@ -18,7 +18,7 @@ The module does not delete instances, configure host mounts, or enable privilege
 On the Incus host, check out this repository, then run:
 
 ```sh
-./cockpit-incus/install-user.sh
+./install-user.sh
 ```
 
 Reload Cockpit. The Incus entry appears in the System menu. For system-wide installation, copy the `incus/` directory to `/usr/local/share/cockpit/incus/` and make it readable by Cockpit users.
