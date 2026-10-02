@@ -4,14 +4,24 @@ A Cockpit package for managing Incus instances on the Cockpit host. It uses the 
 
 ## Current features
 
-- Live instance list, state, type, IPv4, totals, and name filtering
-- Start and gracefully stop instances
-- Timestamped snapshots with a confirmation step
-- Instance inspection using `incus info`
-- Launch Debian 12, Ubuntu 24.04, and Alpine 3.20 containers or VMs
-- Uses the host's default Incus profile and sets 2 CPU / 2 GiB memory limits
+- Live instance list with state, type, IPv4, published proxy ports, and deployment-group tags
+- Start, stop, inspect, and timestamped snapshot actions
+- Launch Debian, Ubuntu, and Alpine containers or virtual machines
+- Import a public GitHub repository as a Dockerfile application or root-level Docker Compose stack inside an isolated Ubuntu VM
+- Preview the generated cloud-init plan before launch; deployment code runs only after a trust confirmation
+- Tag deployment VMs with `user.cockpit-incus.deployment`, and keep source, branch, and layout as instance metadata
+- Map chosen guest ports to host loopback only; provide an optional hostname plus a Caddy reverse-proxy snippet for the operator to configure
+- Sample per-instance Incus virtual NIC byte counters every 30 seconds and retain a browser-local 24-hour history, with 5-minute, 15-minute, 20-minute, 1-hour, 4-hour, 8-hour, and 24-hour views
 
-The module does not delete instances, configure host mounts, or enable privileged containers.
+### Telemetry and access counts
+
+Incus exposes cumulative per-instance NIC counters. The module turns differences between samples into received/sent totals for the selected range. Sampling starts when the module is open; history is stored in that browser, not centrally. Pausing/closing Cockpit, clearing browser storage, or an instance restart can create gaps or reset an instance's counter baseline.
+
+HTTP request totals are not currently collected. The host's Caddy configuration has no HTTP access-log source to query; network byte counters cannot determine request counts. A future access-log adapter needs an enabled Caddy JSON log source and a controlled, read-only path from the Cockpit session.
+
+GitHub deployments currently support public HTTPS repositories with a Dockerfile at repository root, or a Compose file at repository root. Private repositories, monorepo subdirectories, arbitrary buildpacks, automatic DNS edits, and automatic Caddy edits are not supported yet. The wizard intentionally launches one Ubuntu VM per deployment; Compose services run together inside that VM and carry one deployment tag. Proxy listeners bind to host loopback only. Review repository build scripts before approving them.
+
+The module does not delete instances, enable privileged Incus containers, publish ports on all host interfaces, or configure host mounts.
 
 ## Install for the signed-in user
 
