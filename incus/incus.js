@@ -55,6 +55,24 @@
       return { hostPort, guestPort, url: baseUrl ? String(baseUrl) : `127.0.0.1:${hostPort}`, publicUrl: Boolean(baseUrl) };
     });
   }
+  function assignedSpecs(item) {
+    const config = item.expanded_config || item.config || {};
+    const devices = item.expanded_devices || item.devices || {};
+    const root = Object.values(devices).find(device => device.type === 'disk' && device.path === '/');
+    const image = [config['image.os'], config['image.release'], config['image.variant']].filter(Boolean).join(' ');
+    return {
+      cpu: config['limits.cpu'] || 'No explicit limit',
+      memory: config['limits.memory'] || 'No explicit limit',
+      disk: root?.size || 'Pool default',
+      pool: root?.pool || '',
+      profiles: Array.isArray(item.profiles) && item.profiles.length ? item.profiles.join(', ') : 'None',
+      image: image || config['image.description'] || config['image.architecture'] || 'Not reported',
+      architecture: config['image.architecture'] || item.architecture || '',
+      memoryUsage: item.state?.memory?.usage,
+      memoryTotal: item.state?.memory?.total,
+      devices: Object.entries(devices).map(([name, device]) => ({ name, ...device })),
+    };
+  }
   function networkCounters(item) {
     const totals = { received: 0, sent: 0 };
     Object.entries(item.state?.network || {}).forEach(([name, network]) => {
@@ -129,7 +147,7 @@
       type: String(item.type || 'container'),
       ipv4: findIPv4(item.state?.network) || item.expanded_devices?.eth0?.['ipv4.address'] || '',
       description: String(item.description || ''), group: itemConfig(item, 'user.cockpit-incus.deployment'),
-      ports: getPortMappings(item),
+      ports: getPortMappings(item), specs: assignedSpecs(item),
     };
   }
   function visibleInstances() {
@@ -167,6 +185,12 @@
       state.textContent = item.status; stateCell.append(state);
       const typeCell = document.createElement('td'); const type = document.createElement('span');
       type.className = 'type-pill'; type.textContent = item.type.toLowerCase().includes('virtual') ? 'Virtual machine' : 'Container'; typeCell.append(type);
+      const specsCell = document.createElement('td'); specsCell.className = 'specs-cell';
+      const cpu = document.createElement('span'); cpu.className = 'spec-value'; cpu.textContent = `CPU · ${item.specs.cpu}`;
+      const memory = document.createElement('span'); memory.className = 'spec-value'; memory.textContent = `RAM · ${item.specs.memory}`;
+      const disk = document.createElement('span'); disk.className = 'spec-value'; disk.textContent = `Disk · ${item.specs.disk}`;
+      const profile = document.createElement('small'); profile.className = 'spec-profile'; profile.textContent = `Profile · ${item.specs.profiles}`;
+      specsCell.append(cpu, memory, disk, profile);
       const ipCell = document.createElement('td'); ipCell.className = 'ip'; ipCell.textContent = item.ipv4 || '—';
       const portsCell = document.createElement('td'); portsCell.className = 'ports-cell';
       if (item.ports.length) item.ports.forEach(port => {
@@ -178,7 +202,7 @@
       actions.append(makeAction('Inspect', inspectInstance, item));
       if (status === 'running') { actions.append(makeAction('Snapshot', snapshotInstance, item)); actions.append(makeAction('Stop', changeState, item, 'action-danger')); }
       else if (status === 'stopped') actions.append(makeAction('Start', changeState, item));
-      actionCell.append(actions); row.append(nameCell, stateCell, typeCell, ipCell, portsCell, actionCell); instanceBody.append(row);
+      actionCell.append(actions); row.append(nameCell, stateCell, typeCell, specsCell, ipCell, portsCell, actionCell); instanceBody.append(row);
     });
   }
   async function refresh({ sample = true } = {}) {
@@ -232,9 +256,33 @@
     finally { busy = false; }
   }
   async function inspectInstance(item) {
-    $('#inspect-title').textContent = item.name; $('#inspect-output').textContent = 'Loading instance details…'; inspectDialog.showModal();
+    $('#inspect-title').textContent = item.name;
+    renderInspectSpecs(item);
+    $('#inspect-output').textContent = 'Loading instance details…'; inspectDialog.showModal();
     try { $('#inspect-output').textContent = await runIncus(['info', item.name, '--show-log']) || 'No details returned.'; }
     catch (error) { $('#inspect-output').textContent = error.message || 'Could not inspect this instance.'; }
+  }
+  function renderInspectSpecs(item) {
+    const grid = $('#inspect-spec-grid');
+    grid.replaceChildren();
+    const entries = [
+      ['CPU limit', item.specs.cpu], ['Memory limit', item.specs.memory],
+      ['Root disk', item.specs.disk], ['Storage pool', item.specs.pool || 'Not reported'],
+      ['Profiles', item.specs.profiles], ['Base image', item.specs.image],
+    ];
+    if (item.specs.architecture) entries.push(['Architecture', item.specs.architecture]);
+    if (Number.isFinite(item.specs.memoryUsage) && Number.isFinite(item.specs.memoryTotal)) {
+      entries.push(['Current memory use', `${formatBytes(item.specs.memoryUsage)} of ${formatBytes(item.specs.memoryTotal)}`]);
+    }
+    item.specs.devices.filter(device => !(device.type === 'disk' && device.path === '/')).forEach(device => {
+      const detail = [device.type, device.path, device.size, device.pool, device.source, device.listen, device.connect].filter(Boolean).join(' · ');
+      entries.push([`Device · ${device.name}`, detail || 'Configured']);
+    });
+    entries.forEach(([label, value]) => {
+      const term = document.createElement('dt'); term.textContent = label;
+      const description = document.createElement('dd'); description.textContent = String(value);
+      grid.append(term, description);
+    });
   }
   function parseRepo(value) {
     let url; try { url = new URL(value.trim()); } catch { throw new Error('Paste a valid https://github.com/owner/repository URL.'); }

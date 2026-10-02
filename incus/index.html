@@ -35,7 +35,7 @@
       <div class="panel-heading instance-heading"><div><h2>Instances</h2><p>Start, stop, inspect, snapshot, and open published services.</p></div><label class="search"><span class="sr-only">Filter instances</span><input id="filter" type="search" placeholder="Filter by name…" autocomplete="off"></label></div>
       <div id="notice" class="notice" role="status" hidden></div>
       <div id="empty" class="empty" hidden><span class="empty-mark">◇</span><b>No Incus instances yet</b><p>Launch your first container or virtual machine below.</p></div>
-      <div class="table-scroll"><table><thead><tr><th>Name</th><th>State</th><th>Type</th><th>IPv4</th><th>Published ports · service URLs</th><th class="actions-head">Actions</th></tr></thead><tbody id="instances"></tbody></table></div>
+      <div class="table-scroll"><table><thead><tr><th>Name</th><th>State</th><th>Type</th><th>Assigned specs</th><th>IPv4</th><th>Published ports · service URLs</th><th class="actions-head">Actions</th></tr></thead><tbody id="instances"></tbody></table></div>
       <p id="no-match" class="no-match" hidden>No instances match that filter.</p>
     </section>
 
@@ -80,6 +80,6 @@
     </form>
   </dialog>
 
-  <dialog id="inspect-dialog" class="inspect-dialog"><div class="dialog-head"><div><span class="eyebrow">INSTANCE DETAILS</span><h2 id="inspect-title">Instance</h2></div><button type="button" class="dialog-close" aria-label="Close">×</button></div><pre id="inspect-output"></pre></dialog>
+  <dialog id="inspect-dialog" class="inspect-dialog"><div class="dialog-head"><div><span class="eyebrow">INSTANCE DETAILS</span><h2 id="inspect-title">Instance</h2></div><button type="button" class="dialog-close" aria-label="Close">×</button></div><section class="inspect-specs"><h3>Configured resources</h3><dl id="inspect-spec-grid" class="inspect-spec-grid"></dl></section><h3 class="inspect-runtime-title">Runtime details</h3><pre id="inspect-output"></pre></dialog>
 </body>
 </html>
