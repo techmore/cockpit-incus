@@ -19,6 +19,7 @@
   const cpuBaselines = new Map();
   const memorySamples = new Map();
   let lastDiskPoll = 0;
+  let diskSampling = false;
 
   function setConnection(state, message) {
     connection.className = `connection ${state ? `is-${state}` : ''}`;
@@ -30,12 +31,22 @@
     notice.hidden = false;
   }
   function clearNotice() { notice.hidden = true; notice.textContent = ''; }
-  function runIncus(args) {
-    return cockpit.spawn(['incus', '--force-local', ...args], { err: 'message' }).catch((error, stderr) => {
+  function runIncus(args, timeout = 0) {
+    const process = cockpit.spawn(['incus', '--force-local', ...args], { err: 'message' });
+    const timer = timeout ? window.setTimeout(() => process.close('timeout'), timeout) : null;
+    const result = process.catch((error, stderr) => {
       const wrapped = new Error(stderr || error.message || 'Incus command failed.');
       Object.assign(wrapped, error);
       if (stderr) wrapped.message = stderr;
       throw wrapped;
+    });
+    if (!timer) return result;
+    return result.then(output => {
+      window.clearTimeout(timer);
+      return output;
+    }, error => {
+      window.clearTimeout(timer);
+      throw error;
     });
   }
   function parseJson(text, fallback = []) {
@@ -125,21 +136,27 @@
   }
   async function sampleDiskUsage() {
     const now = Date.now();
-    if (now - lastDiskPoll < diskPollEvery) return;
-    lastDiskPoll = now;
+    if (diskSampling || now - lastDiskPoll < diskPollEvery) return;
+    diskSampling = true;
     const running = instances.filter(item => item.status.toLowerCase() === 'running');
-    await Promise.allSettled(running.map(async item => {
-      try {
-        const output = await runIncus(['exec', item.name, '--', 'du', '-sx', '-B1', '/']);
-        const bytes = Number(String(output).trim().split(/\s+/)[0]);
-        const current = instances.find(entry => entry.name === item.name);
-        if (current && Number.isFinite(bytes)) { current.live.diskBytes = bytes; current.live.diskError = false; }
-      } catch {
-        const current = instances.find(entry => entry.name === item.name);
-        if (current) { current.live.diskBytes = null; current.live.diskError = true; }
+    try {
+      for (const item of running) {
+        try {
+          // Bound the work inside the guest and the Cockpit process separately.
+          const output = await runIncus(['exec', item.name, '--', 'timeout', '-k', '5', '30', 'du', '-sx', '-B1', '/'], 45_000);
+          const bytes = Number(String(output).trim().split(/\s+/)[0]);
+          const current = instances.find(entry => entry.name === item.name);
+          if (current && Number.isFinite(bytes)) { current.live.diskBytes = bytes; current.live.diskError = false; }
+        } catch {
+          const current = instances.find(entry => entry.name === item.name);
+          if (current) { current.live.diskBytes = null; current.live.diskError = true; }
+        }
       }
-    }));
-    render();
+    } finally {
+      lastDiskPoll = Date.now();
+      diskSampling = false;
+      render();
+    }
   }
   function liveLoadCell(item) {
     const cell = document.createElement('td'); cell.className = 'live-load-cell';
@@ -304,7 +321,8 @@
     try {
       const parsed = parseJson(await runIncus(['list', '--format=json']), null);
       if (!Array.isArray(parsed)) throw new Error('Incus returned an unexpected instance list.');
-      instances = parsed.map(normalizeInstance).filter(item => item.name);
+      const diskUsage = new Map(instances.map(item => [item.name, { diskBytes: item.live?.diskBytes, diskError: item.live?.diskError }]));
+      instances = parsed.map(item => ({ ...normalizeInstance(item), live: diskUsage.get(item.name) || {} })).filter(item => item.name);
       updateCpuMetrics();
       updateStats(); render(); setConnection('online', 'Connected to Incus');
       if (sample) recordTraffic();
@@ -427,7 +445,7 @@
       ['bash', '-lc', `git clone --depth 1 --branch '${input.branch}' -- '${input.url}' /opt/app`],
       input.layout === 'compose'
         ? ['bash', '-lc', 'cd /opt/app && docker compose up -d --build']
-        : ['bash', '-lc', `cd /opt/app && docker build -t incus-app . && docker run -d --restart unless-stopped -p 0.0.0.0:${input.ports[0].guest}:${input.ports[0].guest} --name incus-app incus-app`],
+        : ['bash', '-lc', `cd /opt/app && docker build -t incus-app . && docker run -d --restart unless-stopped ${[...new Set(input.ports.map(port => port.guest))].map(guest => `-p 0.0.0.0:${guest}:${guest}`).join(' ')} --name incus-app incus-app`],
     ];
     return `#cloud-config\npackage_update: true\npackages:\n  - git\n  - docker.io\n  - docker-compose-v2\nruncmd:\n${steps.map(step => `  - [${step.map(value => JSON.stringify(value)).join(', ')}]`).join('\n')}\n`;
   }
@@ -480,7 +498,7 @@
       $('#deploy-plan-text').textContent = [
         `GitHub: ${input.url}`, `Branch: ${input.branch}`, `Deployment tag: ${input.name}`,
         `Layout: ${input.layout === 'compose' ? 'Compose stack in a single VM' : 'Dockerfile app in a single VM'}`,
-        'Base: Ubuntu 24.04 VM · 2 CPU · 4 GiB RAM · default profile',
+        'Base: Ubuntu 24.04 cloud VM · 2 CPU · 4 GiB RAM · default profile',
         `Loopback only: ${input.ports.map(port => `127.0.0.1:${port.host} → VM:${port.guest}`).join(' · ')}`,
         ...(input.hostname ? [`Reserved URL: https://${input.hostname} (Caddy/DNS route not installed)`, `${input.hostname} { reverse_proxy 127.0.0.1:${input.ports[0].host} }`] : []),
         'Cloud-init will install Docker, clone the repo, and build/run it on first boot.', '', cloudConfig(input),
@@ -493,8 +511,8 @@
     if (busy || $('#deploy-run').disabled) return;
     let input; try { input = deploymentInputs(); } catch (error) { $('#deploy-error').textContent = error.message; $('#deploy-error').hidden = false; return; }
     const args = [
-      'launch', 'images:ubuntu/24.04', input.name, '--vm',
-      '--config', 'limits.cpu=2', '--config', 'limits.memory=4GiB', '--config', `user.user-data=${cloudConfig(input)}`,
+      'launch', 'images:ubuntu/24.04/cloud', input.name, '--vm',
+      '--config', 'limits.cpu=2', '--config', 'limits.memory=4GiB', '--config', `cloud-init.user-data=${cloudConfig(input)}`,
       '--config', `user.cockpit-incus.deployment=${input.name}`, '--config', `user.cockpit-incus.source=${input.url}`,
       '--config', `user.cockpit-incus.branch=${input.branch}`, '--config', `user.cockpit-incus.layout=${input.layout}`,
       ...(input.hostname ? ['--config', `user.cockpit-incus.url=https://${input.hostname}`] : []),
