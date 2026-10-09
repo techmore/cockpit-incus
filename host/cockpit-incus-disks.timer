@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh Incus root file usage every five minutes
+
+[Timer]
+OnBootSec=60
+OnUnitInactiveSec=5min
+AccuracySec=5
+Unit=cockpit-incus-disks.service
+
+[Install]
+WantedBy=timers.target
+

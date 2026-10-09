@@ -7,7 +7,7 @@
   const filter = $('#filter');
   const inspectDialog = $('#inspect-dialog');
   const deployDialog = $('#deploy-dialog');
-  const historyKey = 'cockpit-incus-traffic-v1';
+  const historyKey = 'cockpit-incus-traffic-v2';
   const pollEvery = 30_000;
   const diskPollEvery = 5 * 60_000;
   const retention = 24 * 60 * 60 * 1000;
@@ -20,6 +20,47 @@
   const memorySamples = new Map();
   let lastDiskPoll = 0;
   let diskSampling = false;
+  let refreshing = false;
+  let currentProject = null;
+  let telemetry = null;
+  const telemetryFile = cockpit.file('/var/cache/cockpit-incus/telemetry.json');
+
+  function selectedSeconds() { return Number($('#traffic-window').value) / 1000; }
+  function windowLabel() { return $('#traffic-window').selectedOptions[0].textContent; }
+  function instanceKey(item) { return `${item.project || currentProject || 'default'}/${item.name}`; }
+  function freshTelemetry() { return telemetry?.version === 1 && Math.abs(Date.now() - telemetry.generated_at) < 90_000; }
+  function accessReady() { return freshTelemetry() && telemetry.access?.available && telemetry.access?.configured; }
+  function instanceMetrics(item) { return freshTelemetry() ? telemetry.instances?.[instanceKey(item)]?.windows?.[selectedSeconds()] : null; }
+  function assignedDomains(item) { return (telemetry?.domains || []).filter(domain => domain.instances?.includes(instanceKey(item))); }
+  function instanceDomainUrl(domain, item) {
+    const bindings = (domain.bindings || []).filter(binding => binding.instances.includes(instanceKey(item)));
+    const binding = bindings.find(entry => entry.port === 443) || bindings.find(entry => entry.port === 80) || bindings[0];
+    if (!binding) return domain.url;
+    try {
+      const url = new URL(domain.url);
+      url.protocol = binding.port === 80 ? 'http:' : 'https:';
+      url.port = [80, 443].includes(binding.port) ? '' : String(binding.port);
+      return url.href;
+    } catch { return domain.url; }
+  }
+  function textElement(tag, text, className = '') {
+    const node = document.createElement(tag); node.textContent = text; node.className = className; return node;
+  }
+  function serviceLink(url, label, className = 'domain-link') {
+    const node = textElement('a', label, className);
+    try {
+      const parsed = new URL(url);
+      if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) return textElement('span', label, className);
+      node.href = parsed.href; node.target = '_blank'; node.rel = 'noopener noreferrer';
+    } catch { return textElement('span', label, className); }
+    return node;
+  }
+  async function readTelemetry() {
+    try {
+      const value = parseJson(await telemetryFile.read(), null);
+      if (value?.version === 1 && Array.isArray(value.domains) && value.instances && value.windows) telemetry = value;
+    } catch { /* Instance management remains usable when the host collector is absent. */ }
+  }
 
   function setConnection(state, message) {
     connection.className = `connection ${state ? `is-${state}` : ''}`;
@@ -31,8 +72,8 @@
     notice.hidden = false;
   }
   function clearNotice() { notice.hidden = true; notice.textContent = ''; }
-  function runIncus(args, timeout = 0) {
-    const process = cockpit.spawn(['incus', '--force-local', ...args], { err: 'message' });
+  function runIncus(args, timeout = 0, project = currentProject) {
+    const process = cockpit.spawn(['incus', '--force-local', ...(project ? ['--project', project] : []), ...args], { err: 'message' });
     const timer = timeout ? window.setTimeout(() => process.close('timeout'), timeout) : null;
     const result = process.catch((error, stderr) => {
       const wrapped = new Error(stderr || error.message || 'Incus command failed.');
@@ -135,6 +176,7 @@
     });
   }
   async function sampleDiskUsage() {
+    if (freshTelemetry()) return; // The host timer samples even with Cockpit closed.
     const now = Date.now();
     if (diskSampling || now - lastDiskPoll < diskPollEvery) return;
     diskSampling = true;
@@ -143,7 +185,7 @@
       for (const item of running) {
         try {
           // Bound the work inside the guest and the Cockpit process separately.
-          const output = await runIncus(['exec', item.name, '--', 'timeout', '-k', '5', '30', 'du', '-sx', '-B1', '/'], 45_000);
+          const output = await runIncus(['exec', item.name, '--', 'timeout', '-k', '5', '30', 'du', '-sx', '-B1', '/'], 45_000, item.project);
           const bytes = Number(String(output).trim().split(/\s+/)[0]);
           const current = instances.find(entry => entry.name === item.name);
           if (current && Number.isFinite(bytes)) { current.live.diskBytes = bytes; current.live.diskError = false; }
@@ -162,9 +204,14 @@
     const cell = document.createElement('td'); cell.className = 'live-load-cell';
     const memoryUsage = Number(item.raw.state?.memory?.usage);
     const memoryTotal = Number(item.raw.state?.memory?.total);
-    const memoryPercent = Number.isFinite(item.live?.memoryPercentAverage) ? Math.min(100, item.live.memoryPercentAverage) : null;
+    const metrics = instanceMetrics(item);
+    const memoryPercent = Number.isFinite(metrics?.memory_percent) ? metrics.memory_percent : Number.isFinite(item.live?.memoryPercentAverage) ? item.live.memoryPercentAverage : null;
     const cpu = document.createElement('span'); cpu.className = 'load-value';
     if (item.status.toLowerCase() !== 'running') cpu.textContent = 'CPU · stopped';
+    else if (Number.isFinite(metrics?.cpu_cores)) {
+      cpu.textContent = Number.isFinite(metrics.cpu_percent) ? `CPU · ${metrics.cpu_percent.toFixed(1)}% avg` : `CPU · ${metrics.cpu_cores.toFixed(2)} cores avg`;
+      cpu.title = `${windowLabel()} average of collected samples; percent is relative to the configured CPU limit.`;
+    }
     else if (Number.isFinite(item.live?.cpuCores)) {
       cpu.textContent = cpuLimitCount(item) ? `CPU · ${item.live.cpuPercent.toFixed(1)}% avg` : `CPU · ${item.live.cpuCores.toFixed(2)} cores avg`;
       cpu.title = cpuLimitCount(item) ? 'Average use as a percentage of this instance’s configured CPU limit' : 'Average CPU cores used; this instance has no explicit CPU limit';
@@ -172,14 +219,16 @@
     else cpu.textContent = 'CPU · sampling…';
     const ram = document.createElement('span'); ram.className = 'load-value';
     ram.textContent = item.status.toLowerCase() !== 'running' ? 'RAM · stopped' : Number.isFinite(memoryPercent) ? `RAM · ${memoryPercent.toFixed(0)}% avg` : 'RAM · sampling…';
-    if (Number.isFinite(memoryPercent)) ram.title = `Current: ${formatBytes(memoryUsage)} of ${formatBytes(memoryTotal)} · average of samples from the last 5 minutes`;
+    if (Number.isFinite(memoryPercent)) ram.title = `Current: ${formatBytes(memoryUsage)} of ${formatBytes(memoryTotal)} · ${metrics ? windowLabel() : '5-minute browser'} sample average. Incus usage can include filesystem cache.`;
     const disk = document.createElement('span'); disk.className = 'load-value';
-    if (Number.isFinite(item.live?.diskBytes)) {
+    const centralDisk = freshTelemetry() ? telemetry.instances?.[instanceKey(item)]?.disk : null;
+    const diskBytes = centralDisk ? centralDisk.bytes : item.live?.diskBytes;
+    if (Number.isFinite(diskBytes)) {
       const capacity = capacityBytes(item.specs.disk);
-      const percent = capacity > 0 ? ` · ${(item.live.diskBytes / capacity * 100).toFixed(0)}% of configured size` : '';
-      disk.textContent = `Disk · ${formatBytes(item.live.diskBytes)}${percent}`;
-      disk.title = capacity > 0 ? 'Root filesystem files compared with the configured root disk size' : 'Root filesystem file usage; no configured disk capacity to calculate a percentage';
-    } else disk.textContent = item.status.toLowerCase() !== 'running' ? 'Disk · stopped' : item.live?.diskError ? 'Disk · unavailable' : 'Disk · sampling…';
+      const percent = capacity > 0 ? ` · ${(diskBytes / capacity * 100).toFixed(0)}% estimated` : '';
+      disk.textContent = `Disk · ${formatBytes(diskBytes)}${percent}`;
+      disk.title = `${capacity > 0 ? 'Root files compared with configured disk size; quotas may not be enforced.' : 'Root file usage; no configured capacity.'}${centralDisk ? ` Sampled ${new Date(centralDisk.t * 1000).toLocaleTimeString()}.` : ''}`;
+    } else disk.textContent = item.status.toLowerCase() !== 'running' ? 'Disk · stopped' : centralDisk?.error || item.live?.diskError ? 'Disk · unavailable' : 'Disk · sampling…';
     cell.append(cpu, ram, disk);
     return cell;
   }
@@ -200,8 +249,8 @@
   }
   function recordTraffic() {
     const t = Date.now();
-    const current = Object.fromEntries(instances.filter(item => item.status.toLowerCase() === 'running').map(item => [item.name, networkCounters(item.raw)]));
-    const previous = samples.at(-1);
+    const current = Object.fromEntries(instances.filter(item => item.status.toLowerCase() === 'running').map(item => [instanceKey(item), networkCounters(item.raw)]));
+    const previous = samples.filter(sample => sample.project === currentProject).at(-1);
     const delta = { received: 0, sent: 0 };
     if (previous) Object.entries(current).forEach(([name, counts]) => {
       const before = previous.instances?.[name];
@@ -209,7 +258,7 @@
       delta.received += Math.max(0, counts.received - before.received);
       delta.sent += Math.max(0, counts.sent - before.sent);
     });
-    samples.push({ t, instances: current, ...delta });
+    samples.push({ t, project: currentProject, instances: current, ...delta });
     samples = samples.filter(sample => sample.t >= t - retention - pollEvery);
     try { localStorage.setItem(historyKey, JSON.stringify(samples)); } catch { /* Retain this session's chart if browser storage is unavailable. */ }
     renderTraffic();
@@ -222,20 +271,48 @@
   }
   function renderTraffic() {
     const duration = Number($('#traffic-window').value);
-    const visible = samples.filter(sample => sample.t >= Date.now() - duration);
+    const visible = samples.filter(sample => sample.project === currentProject && sample.t >= Date.now() - duration);
     const totals = visible.reduce((sum, sample) => ({ received: sum.received + sample.received, sent: sum.sent + sample.sent }), { received: 0, sent: 0 });
-    $('#traffic-down').textContent = formatBytes(totals.received);
-    $('#traffic-up').textContent = formatBytes(totals.sent);
-    const first = visible[0]?.t;
-    $('#traffic-sampled').textContent = samples.length > 1 ? `Samples cover ${Math.max(0, Math.round((Date.now() - first) / 60_000))} min · page must stay open` : 'Waiting for first sample…';
-    const chart = $('#traffic-chart');
-    chart.replaceChildren();
+    const window = freshTelemetry() ? telemetry.windows?.[selectedSeconds()] : null;
+    const http = accessReady() ? window?.http : null;
+    const network = window?.network || totals;
+    $('#traffic-down').textContent = formatBytes(network.received);
+    $('#traffic-up').textContent = formatBytes(network.sent);
+    $('#access-count').textContent = http ? http.external_requests.toLocaleString() : '—';
+    $('#http-down').textContent = http ? formatBytes(http.received) : '—';
+    $('#http-up').textContent = http ? formatBytes(http.sent) : '—';
+    $('#http-errors').textContent = http ? `${http.errors5.toLocaleString()} / ${http.average_ms === null ? '—' : `${http.average_ms.toLocaleString()} ms`}` : '—';
+    $('#access-source').textContent = http ? `${(http.public_requests || 0).toLocaleString()} public peers · ${(http.gateway_requests || 0).toLocaleString()} gateway · ${http.local_requests.toLocaleString()} local · ${http.unknown_requests.toLocaleString()} unknown` : 'HTTP logging not available';
+    $('#instance-metric-window').textContent = window ? `CPU / RAM averages · ${windowLabel()}` : 'CPU since last poll · RAM over 5 minutes';
+    if (window) {
+      const coverage = Math.floor(window.coverage_seconds / 60);
+      const httpSince = telemetry.access?.since ? new Date(telemetry.access.since).toLocaleTimeString() : 'not enabled';
+      $('#traffic-sampled').textContent = `Host history covers ${coverage} min of ${windowLabel()} · HTTP logging since ${httpSince}`;
+      $('#telemetry-status').textContent = `Collected on host · ${new Date(telemetry.generated_at).toLocaleTimeString()}${telemetry.access?.backlog ? ' · catching up with logs' : ''}${telemetry.errors?.length ? ` · ${telemetry.errors[0]}` : ''}`;
+      $('#telemetry-status').className = `collector-state${telemetry.errors?.length ? ' collector-warning' : ''}`;
+    } else {
+      const first = visible[0]?.t;
+      $('#traffic-sampled').textContent = visible.length > 1 ? `Browser samples cover ${Math.max(0, Math.round((Date.now() - first) / 60_000))} min · page must stay open` : 'Waiting for a second network sample…';
+      $('#telemetry-status').textContent = telemetry ? 'Host collector stale · browser network fallback' : 'Host collector not installed · browser network fallback';
+      $('#telemetry-status').className = 'collector-state collector-warning';
+    }
+    let view = $('#traffic-view').value;
+    if (!http && view !== 'network') view = 'network';
     const buckets = Array.from({ length: 36 }, () => ({ received: 0, sent: 0 }));
-    visible.forEach(sample => {
+    if (window) {
+      window.chart.forEach((entry, index) => {
+        buckets[index].received = entry[view === 'requests' ? 2 : view === 'http' ? 3 : 0];
+        buckets[index].sent = view === 'requests' ? 0 : entry[view === 'http' ? 4 : 1];
+      });
+    } else visible.forEach(sample => {
       const index = Math.max(0, Math.min(35, Math.floor(((sample.t - (Date.now() - duration)) / duration) * 36)));
-      buckets[index].received += sample.received;
-      buckets[index].sent += sample.sent;
+      buckets[index].received += sample.received; buckets[index].sent += sample.sent;
     });
+    $('#legend-down').textContent = view === 'requests' ? 'External requests' : 'Received';
+    $('#legend-up').textContent = 'Sent';
+    $('#legend-up-wrapper').hidden = view === 'requests';
+    const chart = $('#traffic-chart'); chart.replaceChildren();
+    chart.setAttribute('aria-label', `${view === 'requests' ? 'External HTTP requests' : view === 'http' ? 'External HTTP body bytes' : 'Instance network bytes'} across ${windowLabel()}`);
     const max = Math.max(1, ...buckets.map(bucket => bucket.received + bucket.sent));
     buckets.forEach((bucket, index) => {
       const pair = document.createElement('div');
@@ -246,14 +323,63 @@
       const sent = document.createElement('i');
       sent.className = 'traffic-bar traffic-bar-up';
       sent.classList.add(`traffic-level-${Math.max(0, Math.ceil(bucket.sent / max * 10))}`);
-      pair.title = `Bucket ${index + 1}: received ${formatBytes(bucket.received)}, sent ${formatBytes(bucket.sent)}`;
+      const bucketStart = Date.now() - duration + duration / 36 * index;
+      pair.title = `${new Date(bucketStart).toLocaleString()}: ${view === 'requests' ? `${bucket.received.toLocaleString()} external requests` : `received ${formatBytes(bucket.received)}, sent ${formatBytes(bucket.sent)}`}`;
       pair.append(received, sent);
       chart.append(pair);
     });
   }
+  function renderDomains() {
+    const body = $('#domains'); body.replaceChildren();
+    const domains = telemetry?.domains || [];
+    $('#domain-count').textContent = `${domains.length} configured`;
+    $('#domains-source').textContent = telemetry ? `Caddy config · updated ${new Date(telemetry.routes_updated_at).toLocaleString()}${freshTelemetry() ? '' : ' · collector stale'}` : 'Install the host collector to discover routes and DNS.';
+    const needle = filter.value.trim().toLowerCase();
+    const visible = domains.filter(domain => `${domain.name} ${domain.instances.join(' ')} ${domain.dns?.addresses?.join(' ') || ''}`.toLowerCase().includes(needle));
+    $('#domains-empty').hidden = visible.length > 0;
+    $('#domains-empty').textContent = domains.length ? 'No domains match this filter.' : 'Domain inventory is not available yet.';
+    visible.forEach(domain => {
+      const row = document.createElement('tr');
+      const domainCell = document.createElement('td');
+      domainCell.append(serviceLink(domain.url, domain.name));
+      domainCell.append(textElement('small', `Listeners · ${(domain.listeners || []).join(', ')}`, 'domain-detail'));
+      if (domain.redirects?.length) domainCell.append(textElement('small', `Redirect → ${(domain.redirect_routes || []).map(route => `${route.host} · listener ${(route.listeners || []).join(', ')}`).join('; ') || domain.redirects.join(', ')}`, 'domain-detail'));
+      const targetCell = document.createElement('td');
+      const owners = domain.instances || [];
+      targetCell.append(textElement('b', owners.length ? owners.map(key => key.startsWith('default/') ? key.slice(8) : key).join(', ') : domain.targets?.length ? 'Host / unmapped' : 'Redirect / host route', 'domain-owner'));
+      (domain.targets || []).forEach(target => {
+        const detail = `${(target.listeners || []).map(value => value.split(':').pop()).join(', ')} → ${target.upstream}${target.guest_ports?.length ? ` → guest :${target.guest_ports.join(', :')}` : ''}${target.paths?.length ? ` · ${target.paths.join(', ')}` : ''}`;
+        targetCell.append(textElement('small', detail, 'domain-detail'));
+      });
+      if (owners.length > 1) targetCell.append(textElement('small', 'Multiple owners · attribution follows listener port; shared listeners remain unassigned', 'domain-detail'));
+      const dnsCell = document.createElement('td');
+      dnsCell.append(textElement('span', domain.dns?.status || 'Unknown', domain.dns?.status === 'Resolved' ? 'dns-resolved' : 'dns-warning'));
+      dnsCell.append(textElement('small', (domain.dns?.addresses || []).join(' · '), 'domain-detail'));
+      const metric = accessReady() ? domain.windows?.[selectedSeconds()] : null;
+      const hitsCell = textElement('td', metric ? metric.external_requests.toLocaleString() : '—', 'metric-number');
+      if (metric) hitsCell.title = `${metric.public_requests || 0} public peers · ${metric.gateway_requests || 0} external gateway · ${metric.local_requests} local requests · ${metric.unknown_requests} unknown source`;
+      const bytesCell = textElement('td', metric ? `↓ ${formatBytes(metric.received)} · ↑ ${formatBytes(metric.sent)}` : '—', 'metric-number');
+      bytesCell.title = 'HTTP body bytes for public peers and configured external gateway ingress; excludes TLS and network headers.';
+      const responseCell = textElement('td', metric ? `${metric.errors5} / ${metric.average_ms === null ? '—' : `${metric.average_ms.toLocaleString()} ms`}` : '—', 'metric-number');
+      responseCell.title = '5xx responses / average completed-request duration; long streams are included.';
+      row.append(domainCell, targetCell, dnsCell, hitsCell, bytesCell, responseCell); body.append(row);
+    });
+  }
+  function trafficCell(item) {
+    const cell = document.createElement('td'); cell.className = 'instance-traffic';
+    const metrics = instanceMetrics(item);
+    if (accessReady() && metrics) {
+      cell.append(textElement('b', `${metrics.http.external_requests.toLocaleString()} external requests`));
+      cell.append(textElement('small', `HTTP ↓ ${formatBytes(metrics.http.received)} · ↑ ${formatBytes(metrics.http.sent)}`));
+    } else cell.append(textElement('small', 'HTTP · unavailable'));
+    if (metrics?.network_seconds) cell.append(textElement('small', `NIC ↓ ${formatBytes(metrics.received)} · ↑ ${formatBytes(metrics.sent)}`));
+    else cell.append(textElement('small', 'NIC · sampling…'));
+    cell.title = `${windowLabel()} · HTTP totals for domain listeners assigned to this guest when collected; shared listeners remain unassigned. NIC bytes include internal traffic.`;
+    return cell;
+  }
   function normalizeInstance(item) {
     return {
-      raw: item, name: String(item.name || ''), status: String(item.status || 'Unknown'),
+      raw: item, name: String(item.name || ''), project: currentProject, status: String(item.status || 'Unknown'),
       type: String(item.type || 'container'),
       ipv4: findIPv4(item.state?.network) || item.expanded_devices?.eth0?.['ipv4.address'] || '',
       description: String(item.description || ''), group: itemConfig(item, 'user.cockpit-incus.deployment'),
@@ -262,7 +388,7 @@
   }
   function visibleInstances() {
     const needle = filter.value.trim().toLowerCase();
-    return instances.filter(item => `${item.name} ${item.group} ${item.ipv4}`.toLowerCase().includes(needle));
+    return instances.filter(item => `${item.name} ${item.group} ${item.ipv4} ${assignedDomains(item).map(domain => domain.name).join(' ')}`.toLowerCase().includes(needle));
   }
   function updateStats() {
     $('#stat-total').textContent = instances.length;
@@ -277,6 +403,7 @@
     return button;
   }
   function render() {
+    renderDomains();
     instanceBody.replaceChildren();
     const rows = visibleInstances();
     $('#empty').hidden = instances.length !== 0;
@@ -304,25 +431,39 @@
       const loadCell = liveLoadCell(item);
       const ipCell = document.createElement('td'); ipCell.className = 'ip'; ipCell.textContent = item.ipv4 || '—';
       const portsCell = document.createElement('td'); portsCell.className = 'ports-cell';
+      const domains = assignedDomains(item);
+      domains.forEach(domain => {
+        const url = instanceDomainUrl(domain, item);
+        let label = domain.name;
+        try { const port = new URL(url).port; if (port) label += `:${port}`; } catch { /* Wildcards have no direct URL. */ }
+        portsCell.append(serviceLink(url, label, 'instance-domain-link'));
+      });
       if (item.ports.length) item.ports.forEach(port => {
-        const link = document.createElement('a'); link.className = 'port-link'; link.textContent = `${port.hostPort} → ${port.guestPort}`;
-        if (port.publicUrl) { link.href = port.url; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.title = `Caddy route needed: ${port.url}`; } else { link.classList.add('port-local'); link.title = 'Host-loopback only; configure Caddy to create a browser-accessible URL.'; }
-        const url = document.createElement('small'); url.className = 'port-url'; url.textContent = port.publicUrl ? `${port.url} · Caddy route needed` : `${port.url} · host only`; portsCell.append(link, url);
-      }); else { portsCell.textContent = '—'; portsCell.classList.add('no-ports'); }
+        const link = port.publicUrl ? serviceLink(port.url, `${port.hostPort} → ${port.guestPort}`, 'port-link') : textElement('span', `${port.hostPort} → ${port.guestPort}`, 'port-link port-local');
+        const configured = domains.some(domain => domain.url === port.url || domain.url === `${port.url}/`);
+        link.title = configured ? 'Configured domain route' : port.publicUrl ? 'Declared URL; a configured route was not found' : 'Host-loopback port';
+        const url = textElement('small', port.publicUrl ? `${port.url}${configured ? '' : ' · declared only'}` : `${port.url} · host only`, 'port-url');
+        portsCell.append(link, url);
+      }); else if (!domains.length) { portsCell.textContent = 'No domain'; portsCell.classList.add('no-ports'); }
       const actionCell = document.createElement('td'); const actions = document.createElement('div'); actions.className = 'row-actions';
       actions.append(makeAction('Inspect', inspectInstance, item));
       if (status === 'running') { actions.append(makeAction('Snapshot', snapshotInstance, item)); actions.append(makeAction('Stop', changeState, item, 'action-danger')); }
       else if (status === 'stopped') actions.append(makeAction('Start', changeState, item));
-      actionCell.append(actions); row.append(nameCell, stateCell, typeCell, specsCell, loadCell, ipCell, portsCell, actionCell); instanceBody.append(row);
+      actionCell.append(actions); row.append(nameCell, stateCell, typeCell, specsCell, loadCell, ipCell, portsCell, trafficCell(item), actionCell); instanceBody.append(row);
     });
   }
   async function refresh({ sample = true } = {}) {
+    if (refreshing) return;
+    refreshing = true;
     clearNotice(); $('#refresh').disabled = true;
     try {
+      const [project] = await Promise.all([runIncus(['project', 'get-current'], 10_000, null), readTelemetry()]);
+      if (currentProject !== project.trim()) { cpuBaselines.clear(); memorySamples.clear(); }
+      currentProject = project.trim();
       const parsed = parseJson(await runIncus(['list', '--format=json']), null);
       if (!Array.isArray(parsed)) throw new Error('Incus returned an unexpected instance list.');
-      const diskUsage = new Map(instances.map(item => [item.name, { diskBytes: item.live?.diskBytes, diskError: item.live?.diskError }]));
-      instances = parsed.map(item => ({ ...normalizeInstance(item), live: diskUsage.get(item.name) || {} })).filter(item => item.name);
+      const diskUsage = new Map(instances.map(item => [instanceKey(item), { diskBytes: item.live?.diskBytes, diskError: item.live?.diskError }]));
+      instances = parsed.map(item => ({ ...normalizeInstance(item), live: diskUsage.get(`${currentProject}/${item.name}`) || {} })).filter(item => item.name);
       updateCpuMetrics();
       updateStats(); render(); setConnection('online', 'Connected to Incus');
       if (sample) recordTraffic();
@@ -334,7 +475,7 @@
         : /permission|denied|socket/i.test(error.message || '') ? 'Incus denied access. Check this Cockpit account’s permission to use Incus.'
           : error.message || 'Could not read the Incus instance list.';
       showNotice(detail, true);
-    } finally { $('#refresh').disabled = false; }
+    } finally { $('#refresh').disabled = false; refreshing = false; }
   }
   async function installPendingProxies() {
     for (const [name, ports] of Object.entries(pendingProxies)) {
@@ -383,7 +524,10 @@
       ['CPU limit', item.specs.cpu], ['Memory limit', item.specs.memory],
       ['Root disk', item.specs.disk], ['Storage pool', item.specs.pool || 'Not reported'],
       ['Profiles', item.specs.profiles], ['Base image', item.specs.image],
+      ['Domains', assignedDomains(item).map(domain => domain.name).join(', ') || 'None configured'],
     ];
+    const metrics = instanceMetrics(item);
+    if (accessReady() && metrics) entries.push([`External HTTP · ${windowLabel()}`, `${metrics.http.external_requests.toLocaleString()} requests · ↓ ${formatBytes(metrics.http.received)} · ↑ ${formatBytes(metrics.http.sent)}`]);
     if (item.specs.architecture) entries.push(['Architecture', item.specs.architecture]);
     if (Number.isFinite(item.specs.memoryUsage) && Number.isFinite(item.specs.memoryTotal)) {
       entries.push(['Current memory use', `${formatBytes(item.specs.memoryUsage)} of ${formatBytes(item.specs.memoryTotal)}`]);
@@ -555,7 +699,8 @@
   $('#github-branch').addEventListener('input', invalidateInspection);
   $('#refresh').addEventListener('click', () => refresh());
   filter.addEventListener('input', render);
-  $('#traffic-window').addEventListener('change', renderTraffic);
+  $('#traffic-window').addEventListener('change', () => { renderTraffic(); render(); });
+  $('#traffic-view').addEventListener('change', renderTraffic);
   $('.dialog-close:not(.deploy-close)').addEventListener('click', () => inspectDialog.close());
   inspectDialog.addEventListener('click', event => { if (event.target === inspectDialog) inspectDialog.close(); });
   deployDialog.addEventListener('click', event => { if (event.target === deployDialog) closeDeploy(); });

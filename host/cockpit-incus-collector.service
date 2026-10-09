@@ -1,0 +1,23 @@
+[Unit]
+Description=Collect Incus resources, domain routes and HTTP aggregates
+After=incus.service caddy.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+Environment=HOME=/var/lib/cockpit-incus
+ExecStart=/usr/local/libexec/cockpit-incus/collector.py collect
+StateDirectory=cockpit-incus
+StateDirectoryMode=0700
+CacheDirectory=cockpit-incus
+CacheDirectoryMode=0755
+UMask=0077
+TimeoutStartSec=50
+Nice=10
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/cockpit-incus /var/cache/cockpit-incus
+

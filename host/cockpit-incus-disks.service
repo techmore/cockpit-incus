@@ -1,0 +1,23 @@
+[Unit]
+Description=Sample Incus root filesystem file usage
+After=incus.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+Environment=HOME=/var/lib/cockpit-incus
+ExecStart=/usr/local/libexec/cockpit-incus/collector.py disks
+StateDirectory=cockpit-incus
+StateDirectoryMode=0700
+UMask=0077
+TimeoutStartSec=180
+Nice=19
+IOSchedulingClass=idle
+IOWeight=10
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/cockpit-incus
+

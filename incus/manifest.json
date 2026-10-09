@@ -7,7 +7,7 @@
       "path": "index.html",
       "keywords": [
         {
-          "matches": ["incus", "containers", "virtual machines", "instances"],
+          "matches": ["incus", "lxd", "containers", "virtual machines", "instances", "domains", "traffic"],
           "weight": 10
         }
       ]
