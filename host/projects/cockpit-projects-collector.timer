@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh project analytics every 30 seconds
+
+[Timer]
+OnBootSec=40
+OnUnitActiveSec=30
+AccuracySec=3
+
+[Install]
+WantedBy=timers.target

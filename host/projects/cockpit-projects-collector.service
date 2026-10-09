@@ -1,0 +1,10 @@
+[Unit]
+Description=Project health and visitor aggregates for Cockpit
+After=network.target cockpit-incus-collector.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/libexec/cockpit-incus/projects/collect.py
+TimeoutStartSec=75
+UMask=0077
+Nice=10

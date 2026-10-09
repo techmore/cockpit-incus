@@ -362,8 +362,12 @@ def generate_report(db, items, domains, now, errors):
               'domains': domains, 'instances': {}, 'windows': {}}
     disks = {row['key']: dict(row) for row in db.execute('SELECT * FROM disk')}
     for item in items:
+        config = item.get('expanded_config') or {}
+        roots = [d for d in (item.get('expanded_devices') or {}).values() if d.get('type') == 'disk' and d.get('path') == '/']
         report['instances'][item['_key']] = {'name': item['name'], 'project': item['_project'],
-            'status': item.get('status'), 'disk': disks.get(item['_key']), 'windows': {}}
+            'status': item.get('status'), 'disk': disks.get(item['_key']),
+            'specs': {'cpu': config.get('limits.cpu'), 'memory': config.get('limits.memory'),
+                      'disk': roots[0].get('size') if roots else None}, 'windows': {}}
     resources = list(db.execute('SELECT * FROM resource WHERE t>=? ORDER BY t', (now - 86400 - 90,)))
     requests = list(db.execute('SELECT * FROM http WHERE minute>=? ORDER BY minute', (now - 86400 - 60,)))
     for domain in domains:
@@ -378,7 +382,8 @@ def generate_report(db, items, domains, now, errors):
         instance_stats = {key: {'received': 0, 'sent': 0, 'cpu_sum': 0, 'cpu_time': 0,
                                'percent_sum': 0, 'percent_time': 0, 'memory_sum': 0, 'memory_time': 0,
                                'memory_percent_sum': 0, 'memory_percent_time': 0,
-                               'network_seconds': 0, 'http': http_stats()} for key in report['instances']}
+                               'network_seconds': 0, 'http': http_stats(),
+                               'chart': [[0, 0, 0, 0, 0] for _ in range(36)]} for key in report['instances']}
         domain_stats = {d['name']: http_stats() for d in domains}
         for row in resources:
             if row['t'] <= start or row['key'] not in instance_stats:
@@ -408,6 +413,8 @@ def generate_report(db, items, domains, now, errors):
                 bucket = min(35, max(0, int((row['t'] - start) / seconds * 36)))
                 window['chart'][bucket][0] += received
                 window['chart'][bucket][1] += sent
+                stat['chart'][bucket][0] += received
+                stat['chart'][bucket][1] += sent
         for row in requests:
             if row['minute'] < minute_start:
                 continue
@@ -423,6 +430,11 @@ def generate_report(db, items, domains, now, errors):
                 window['chart'][bucket][2] += row['hits']
                 window['chart'][bucket][3] += row['received']
                 window['chart'][bucket][4] += row['sent']
+                if row['owner'] in instance_stats:
+                    chart = instance_stats[row['owner']]['chart'][bucket]
+                    chart[2] += row['hits']
+                    chart[3] += row['received']
+                    chart[4] += row['sent']
         window['http'] = finish_http(window['http'])
         for key, stat in instance_stats.items():
             result = {name: round(stat[name]) for name in ('received', 'sent', 'network_seconds')}
@@ -430,6 +442,7 @@ def generate_report(db, items, domains, now, errors):
                                      ('memory_bytes', 'memory_sum', 'memory_time'), ('memory_percent', 'memory_percent_sum', 'memory_percent_time')):
                 result[name] = round(stat[total] / stat[span], 2) if stat[span] else None
             result['http'] = finish_http(stat['http'])
+            result['chart'] = stat['chart']
             report['instances'][key]['windows'][str(seconds)] = result
         for domain in domains:
             domain['windows'][str(seconds)] = finish_http(domain_stats[domain['name']])

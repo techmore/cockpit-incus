@@ -1,0 +1,38 @@
+{
+  "discover_routes": true,
+  "analytics_db": "/var/lib/project-analytics/goatcounter.sqlite3",
+  "applications": [
+    {
+      "id": "swartzit",
+      "name": "Swartzit",
+      "description": "Community",
+      "instance": "swartzit",
+      "incus_project": "default",
+      "adapter": "swartzit",
+      "domains": ["swartzit.example.com"],
+      "tracking_hosts": ["swartzit.example.com"],
+      "analytics_vhosts": ["swartzit.analytics.internal"],
+      "site_url": "https://swartzit.example.com/",
+      "admin_url": "https://swartzit.example.com/admin",
+      "health_url": "https://swartzit.example.com/",
+      "github_url": "https://github.com/owner/swartzit",
+      "color": "#467b61"
+    },
+    {
+      "id": "sonder",
+      "name": "Sonder",
+      "description": "Media library",
+      "instance": "sonder",
+      "incus_project": "default",
+      "adapter": "sonder",
+      "domains": ["sonder.example.com"],
+      "tracking_hosts": ["sonder.example.com"],
+      "analytics_vhosts": ["sonder.analytics.internal"],
+      "site_url": "https://sonder.example.com/",
+      "admin_url": "https://sonder.example.com/?settings=1",
+      "health_url": "https://sonder.example.com/",
+      "github_url": "https://github.com/owner/sonder",
+      "color": "#836cbd"
+    }
+  ]
+}

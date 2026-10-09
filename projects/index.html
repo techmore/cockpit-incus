@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Projects</title>
+  <link rel="stylesheet" href="admin-ui.css">
+  <script src="../base1/cockpit.js"></script>
+  <script src="projects.js" defer></script>
+</head>
+<body>
+<main class="admin-shell">
+  <header class="admin-header">
+    <div class="admin-title"><span class="app-mark" aria-hidden="true">P</span><h1>Projects</h1><span id="freshness" class="status-text" role="status">Connecting…</span></div>
+    <div class="toolbar">
+      <label><span class="sr-only">Project</span><select id="project"><option value="all">All projects</option></select></label>
+      <label><span class="sr-only">Time window</span><select id="window"><option value="300">5 minutes</option><option value="900">15 minutes</option><option value="1200">20 minutes</option><option value="3600">1 hour</option><option value="14400">4 hours</option><option value="28800">8 hours</option><option value="86400" selected>24 hours</option></select></label>
+      <button id="refresh" class="icon-button" title="Refresh dashboard" aria-label="Refresh dashboard">↻</button>
+    </div>
+  </header>
+  <nav class="admin-tabs" aria-label="Dashboard sections">
+    <button data-section="overview" class="selected" aria-current="page">Overview</button>
+    <button data-section="visitors">Visitors</button>
+    <button data-section="traffic">Traffic</button>
+    <button data-section="health">Health & resources</button>
+    <button data-section="activity">Activity & releases</button>
+  </nav>
+  <div id="notice" class="notice" role="status" hidden></div>
+  <section id="summary" class="metric-grid" aria-label="Selected project totals"></section>
+  <section class="panel chart-panel" data-sections="overview visitors traffic">
+    <div class="panel-heading"><div><h2 id="chart-title">Pageviews</h2><span id="chart-note" class="muted">Selected window</span></div><label><span class="sr-only">Chart metric</span><select id="chart-metric"><option value="pageviews">Pageviews</option><option value="requests">External requests</option><option value="sent">HTTP downloads</option><option value="received">HTTP uploads</option><option value="network_sent">Instance network sent</option><option value="network_received">Instance network received</option></select></label></div>
+    <div id="chart" class="chart" role="img" aria-label="Activity over the selected window"></div>
+    <div class="chart-axis"><span id="chart-start"></span><span id="chart-end">Now</span></div>
+  </section>
+  <section class="panel" data-sections="overview traffic health">
+    <div class="panel-heading"><h2>Projects <span id="project-count" class="count-badge">0</span></h2><input id="search" type="search" aria-label="Filter projects and domains" placeholder="Filter projects or domains…"></div>
+    <div class="table-scroll"><table><thead><tr><th>Project</th><th>Health</th><th>Visits / views</th><th>External requests</th><th>HTTP up / down</th><th>CPU / RAM average</th><th>Release</th><th>Open</th></tr></thead><tbody id="project-rows"></tbody></table></div>
+    <p id="projects-empty" class="empty" hidden>No projects match this filter.</p>
+  </section>
+  <section class="rank-grid" data-sections="overview visitors">
+    <article class="panel"><div class="panel-heading"><h2>Popular pages</h2><span class="muted">Pageviews</span></div><div id="pages" class="ranking"></div></article>
+    <article class="panel"><div class="panel-heading"><h2>Referrers</h2><span class="muted">Pageviews</span></div><div id="referrers" class="ranking"></div></article>
+    <article class="panel"><div class="panel-heading"><h2>Browsers</h2><span class="muted">Pageviews</span></div><div id="browsers" class="ranking"></div></article>
+    <article class="panel"><div class="panel-heading"><h2>Operating systems</h2><span class="muted">Pageviews</span></div><div id="systems" class="ranking"></div></article>
+  </section>
+  <section class="resource-grid" id="resources" data-sections="health"></section>
+  <section class="panel" data-sections="traffic"><div class="panel-heading"><h2>Domain traffic</h2><span class="muted">Completed external requests</span></div><div class="table-scroll"><table><thead><tr><th>Domain</th><th>Project</th><th>Requests</th><th>Upload / download</th><th>4xx / 5xx</th><th>Average response</th></tr></thead><tbody id="domain-rows"></tbody></table></div></section>
+  <section class="activity-grid" data-sections="activity">
+    <article class="panel"><div class="panel-heading"><h2>Deployments</h2></div><div id="deployments" class="release-list"></div></article>
+    <article class="panel"><div class="panel-heading"><h2>Runner activity</h2><span class="muted">Last 24 hours</span></div><div id="activity" class="release-list"></div></article>
+    <article class="panel"><div class="panel-heading"><h2>Application events</h2><span class="muted">Selected window</span></div><div id="events" class="ranking"></div></article>
+    <article class="panel"><div class="panel-heading"><h2>Analytics backups</h2><span class="muted">Daily · private SQLite</span></div><div id="backups" class="release-list"></div></article>
+  </section>
+  <footer class="admin-footer"><span id="coverage">Waiting for collected history.</span><details><summary>How these numbers are counted</summary><p>Visits are anonymous browser-tab sessions with a 30-minute inactivity limit, estimated per project; they are not a count of individual people. Active visits means a pageview in the last five minutes. New collection has no historical backfill. Tracking respects Do Not Track and Global Privacy Control and excludes admin/sign-in pages.</p><p>HTTP traffic counts completed requests and body bytes. Downloads are server → visitor; uploads are visitor → server. Streaming totals appear when a request completes. Instance network totals also include internal traffic. RAM includes filesystem cache. Disk percentage compares root-file usage to configured capacity and is an estimate.</p></details></footer>
+</main>
+</body>
+</html>

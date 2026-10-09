@@ -45,6 +45,26 @@ The host must have Cockpit and the Incus CLI installed. The signed-in Cockpit ac
 
 For development, the same package can be symlinked into `~/.local/share/cockpit/incus`; Cockpit does not cache packages installed in the user's data directory. See the [Cockpit package guide](https://docs.cockpit-project.org/cockpit-guide/main/guide/packages.html) and [starter kit](https://github.com/cockpit-project/starter-kit).
 
+## Shared Projects dashboard
+
+The separate **Projects** Cockpit menu provides a compact admin view across applications: anonymous visits and active visits, pageviews, referrals, browsers, operating systems, application events, external request/body-byte totals, assigned capacity and average CPU/RAM, root disk estimates, health probes, deployed revisions, runner failures and analytics backup status. All views share the 5/15/20-minute, 1/4/8-hour and 24-hour windows. Routed Incus applications are discovered automatically; register adapters and tracking explicitly for visitor and deployment details. Unknown and stale measurements are labeled instead of shown as zero.
+
+Run on the host:
+
+```sh
+sudo install -m 0600 host/projects/config.example.json /etc/cockpit-incus/projects.json
+# Edit the registry with your real hostnames, health URLs and repositories.
+sudo ./install-projects.sh
+```
+
+The installer pins GoatCounter v2.7.0 and verifies the official Linux amd64 release digest. It installs one SQLite-backed analytics service, a bounded same-origin ingestion relay, a 30-second aggregate collector and daily online SQLite backups (seven retained). Browser visit IDs are site-specific, tab-local, expire after 30 minutes of inactivity, and are re-hashed by GoatCounter before storage. They distinguish visits behind NAT without recording account identities or IP addresses. Counts are visits, not identified people, and totals across projects are summed per-project visits. Tracking respects Do Not Track and Global Privacy Control. Admin/sign-in/API paths, query strings and referrer paths are excluded.
+
+Import `/etc/cockpit-incus/projects-routes.caddy` at Caddy's top level, then `import project_analytics` inside each registered application site. Only `/project-analytics.js` and `/project-analytics/collect` are routed publicly; provider administration and API routes stay on loopback. Add `<script src="/project-analytics.js" defer></script>` to the app. SPA navigation can dispatch `new CustomEvent('project:page', {detail: location.pathname})`; events use `window.ProjectAnalytics?.event('video_playing')`. Tracking failures never block the app.
+
+The project collector reads the pinned GoatCounter SQLite schema in read-only mode for precise short windows; its public stats API uses hourly buckets. Provider upgrades require reviewing this adapter before changing the pin. Raw analytics, session identifiers and count-only API credentials are never exposed to Cockpit. Aggregates are local Cockpit-user-readable, just like the existing Incus report. Reuse `projects/admin-ui.css` and the same metric labels, formatting, status colors and layout in future admin panels.
+
+Paths: `/etc/cockpit-incus/projects.json` (private registry), `/etc/project-analytics/ingest.json` (private count keys), `/var/lib/project-analytics/goatcounter.sqlite3` (31-day raw-hit retention), `/var/cache/cockpit-incus/projects.json` (aggregate report), `/var/backups/project-analytics/` (private backups). Remove by disabling the `project-analytics-*` services/timers and `cockpit-projects-collector.timer`, removing the Caddy imports, app script hooks and Cockpit `projects` package. Preserve/export the private database and backups before removing data.
+
 ## Install continuous host telemetry
 
 Requires Linux with systemd, Python 3, Incus, Caddy, `ip` and `getent`. Run on the Incus host:

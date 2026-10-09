@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily project analytics backup
+
+[Timer]
+OnCalendar=daily
+Persistent=yes
+RandomizedDelaySec=15m
+
+[Install]
+WantedBy=timers.target
