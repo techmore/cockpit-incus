@@ -41,7 +41,7 @@ def main():
         site = db.execute('SELECT site_id FROM sites WHERE cname=?', (vhost,)).fetchone()
         email = app['id'] + '@projects.invalid'
         if not site:
-            password = secrets.token_urlsafe(40)
+            password = secrets.token_urlsafe(32)
             command(['create', 'site', '-vhost', vhost, '-user.email', email, '-user.password', '-'], password)
             private = Path('/etc/project-analytics/' + app['id'] + '-admin.json')
             private.write_text(json.dumps({'email':email,'password':password,'vhost':vhost}) + '\n')
