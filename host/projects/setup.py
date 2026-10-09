@@ -59,7 +59,8 @@ def main():
         db.commit()
         token = db.execute("SELECT token FROM api_tokens WHERE site_id=? AND name='cockpit-project-ingest'", (site_id,)).fetchone()
         if not token:
-            command(['create','apitoken','-user',email,'-name','cockpit-project-ingest','-perm','count'])
+            user_id = db.execute('SELECT user_id FROM users WHERE site_id=? ORDER BY user_id LIMIT 1', (site_id,)).fetchone()[0]
+            command(['create','apitoken','-user',str(user_id),'-name','cockpit-project-ingest','-perm','count'])
             token = db.execute("SELECT token FROM api_tokens WHERE site_id=? AND name='cockpit-project-ingest'",(site_id,)).fetchone()
         for authority in app.get('tracking_hosts', app.get('domains', [])):
             if not re.fullmatch(r'[a-z0-9.-]+(?::[0-9]{1,5})?', authority):
