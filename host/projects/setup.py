@@ -14,8 +14,12 @@ CONFIG = Path('/etc/cockpit-incus/projects.json')
 
 
 def command(args, password=None):
+    env = dict(os.environ)
+    if password is not None:
+        # The pinned CLI uses dotted flag names for this environment default.
+        env['GOATCOUNTER_USER.PASSWORD'] = password
     result = subprocess.run(['runuser', '-u', 'project-analytics', '--', '/usr/local/bin/goatcounter', 'db', *args, '-db', 'sqlite+' + str(DB)],
-        input=password, text=True, capture_output=True)
+        env=env, text=True, capture_output=True)
     if result.returncode:
         raise RuntimeError('GoatCounter provisioning failed: ' + result.stderr[-400:])
 
@@ -42,7 +46,7 @@ def main():
         email = app['id'] + '@projects.invalid'
         if not site:
             password = secrets.token_urlsafe(32)
-            command(['create', 'site', '-vhost', vhost, '-user.email', email, '-user.password', '-'], password)
+            command(['create', 'site', '-vhost', vhost, '-user.email', email], password)
             private = Path('/etc/project-analytics/' + app['id'] + '-admin.json')
             private.write_text(json.dumps({'email':email,'password':password,'vhost':vhost}) + '\n')
             private.chmod(0o600)
