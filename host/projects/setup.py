@@ -16,8 +16,8 @@ CONFIG = Path('/etc/cockpit-incus/projects.json')
 def command(args, password=None):
     env = dict(os.environ)
     if password is not None:
-        # The pinned CLI uses dotted flag names for this environment default.
-        env['GOATCOUNTER_USER.PASSWORD'] = password
+        # The pinned parser converts punctuation in flag names to underscores.
+        env['GOATCOUNTER_USER_PASSWORD'] = password
     result = subprocess.run(['runuser', '-u', 'project-analytics', '--', '/usr/local/bin/goatcounter', 'db', *args, '-db', 'sqlite+' + str(DB)],
         env=env, text=True, capture_output=True)
     if result.returncode:
