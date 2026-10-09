@@ -1,0 +1,19 @@
+# Shared by the site's existing blocks; only telemetry is added.
+(cockpit_incus_access) {
+    log {
+        output file /var/log/caddy/cockpit-incus/access.jsonl {
+            roll_size 50MiB
+            roll_keep 4
+            roll_keep_for 48h
+            roll_uncompressed
+        }
+        format filter {
+            wrap json
+            fields {
+                request>uri delete
+                request>headers delete
+                resp_headers delete
+            }
+        }
+    }
+}

@@ -1,0 +1,12 @@
+[Unit]
+Description=Keep Incus and domain telemetry current without an open browser
+
+[Timer]
+OnBootSec=15
+OnUnitInactiveSec=30
+AccuracySec=1
+Unit=cockpit-incus-collector.service
+
+[Install]
+WantedBy=timers.target
+

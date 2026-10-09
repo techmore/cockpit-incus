@@ -22,12 +22,27 @@
       <article class="stat"><span>Virtual machines</span><b id="stat-vms">—</b></article>
     </section>
 
+    <section class="panel telemetry-panel">
+      <div class="panel-heading traffic-heading"><div><h2>Traffic & load</h2><p id="telemetry-status" class="collector-state">Connecting to host telemetry…</p></div><div class="traffic-controls"><label class="range-picker"><span>Chart</span><select id="traffic-view"><option value="requests">External requests</option><option value="http">External HTTP bytes</option><option value="network">Instance network bytes</option></select></label><label class="range-picker"><span>Window · applies to all tables</span><select id="traffic-window"><option value="300000">5 minutes</option><option value="900000">15 minutes</option><option value="1200000">20 minutes</option><option value="3600000">1 hour</option><option value="14400000">4 hours</option><option value="28800000">8 hours</option><option value="86400000" selected>24 hours</option></select></label></div></div>
+      <div class="traffic-summary"><article class="access-stat"><span>External HTTP requests</span><b id="access-count">—</b><small id="access-source">Waiting for access telemetry…</small></article><article><span>HTTP received · uploads</span><b id="http-down">—</b></article><article><span>HTTP sent · downloads</span><b id="http-up">—</b></article><article><span>5xx responses / average response</span><b id="http-errors">—</b></article><article><span>Instance NIC received · all projects</span><b id="traffic-down">—</b></article><article><span>Instance NIC sent · all projects</span><b id="traffic-up">—</b></article></div>
+      <div id="traffic-chart" class="traffic-chart" role="img" aria-label="External requests across selected time window"></div>
+      <div class="traffic-legend"><span><i class="down-dot"></i><span id="legend-down">External requests</span></span><span id="legend-up-wrapper" hidden><i class="up-dot"></i><span id="legend-up">Sent</span></span><span id="traffic-sampled">Waiting for host history…</span></div>
+      <p class="telemetry-note">Host collection continues with Cockpit closed. External includes public client addresses and explicitly configured public gateway ingress; gateway, direct public, local and unknown counts are shown separately. HTTP totals are completed requests and body bytes, including streams when they finish. NIC totals include internal traffic. HTTP windows use minute buckets; averages use available resource samples.</p>
+    </section>
+
     <section class="panel">
-      <div class="panel-heading instance-heading"><div><h2>Instances</h2><p>CPU avg since last poll · RAM avg over 5 minutes · disk files sampled every 5 minutes; % is an estimate against configured size.</p></div><label class="search"><span class="sr-only">Filter instances</span><input id="filter" type="search" placeholder="Filter by name…" autocomplete="off"></label></div>
+      <div class="panel-heading instance-heading"><div><h2>Instances</h2><p><span id="instance-metric-window">CPU / RAM averages</span> · disk files every 5 minutes; % estimates use configured size.</p></div><label class="search"><span class="sr-only">Filter instances and domains</span><input id="filter" type="search" placeholder="Filter by instance or domain…" autocomplete="off"></label></div>
       <div id="notice" class="notice" role="status" hidden></div>
       <div id="empty" class="empty" hidden><span class="empty-mark">◇</span><b>No Incus instances yet</b><p>Launch your first container or virtual machine below.</p></div>
-      <div class="table-scroll"><table><thead><tr><th>Name</th><th>State</th><th>Type</th><th>Assigned specs</th><th>Live load</th><th>IPv4</th><th>Published ports · service URLs</th><th class="actions-head">Actions</th></tr></thead><tbody id="instances"></tbody></table></div>
+      <div class="table-scroll"><table><thead><tr><th>Name</th><th>State</th><th>Type</th><th>Assigned specs</th><th>Live load</th><th>IPv4</th><th>Domains · published ports</th><th>Traffic · selected window</th><th class="actions-head">Actions</th></tr></thead><tbody id="instances"></tbody></table></div>
       <p id="no-match" class="no-match" hidden>No instances match that filter.</p>
+    </section>
+
+    <section class="panel domains-panel">
+      <div class="panel-heading"><div><h2>Domains <small id="domain-count" class="domain-count">—</small></h2><p id="domains-source">Discovering Caddy routes…</p></div></div>
+      <div class="table-scroll"><table class="domains-table"><thead><tr><th>Domain</th><th>Instance · route</th><th>DNS answers</th><th>External requests</th><th>HTTP received / sent</th><th>5xx / average response</th></tr></thead><tbody id="domains"></tbody></table></div>
+      <p id="domains-empty" class="no-match">Domain inventory is not available yet.</p>
+      <p class="telemetry-note">Configured Caddy hostnames, including redirects. DNS aliases without a configured route cannot be discovered from this host alone. Requests follow their listener port to a guest. Shared listeners keep domain totals without assigning hits to one guest.</p>
     </section>
 
     <section class="panel launch-panel">
@@ -39,14 +54,6 @@
         <button id="launch" class="button button-primary" type="submit">Launch instance <span aria-hidden="true">→</span></button>
       </form>
       <p class="form-note">Creates an unprivileged container or VM with the standard profile. No host mounts or privileged settings are added.</p>
-    </section>
-
-    <section class="panel telemetry-panel">
-      <div class="panel-heading traffic-heading"><div><span class="eyebrow">LIVE SAMPLING · REFRESHES EVERY 30 SECONDS</span><h2>Traffic & access</h2><p>Instance network bytes, measured while this page is open. History stays in this browser.</p></div><label class="range-picker"><span>Window</span><select id="traffic-window"><option value="300000">5 minutes</option><option value="900000">15 minutes</option><option value="1200000">20 minutes</option><option value="3600000">1 hour</option><option value="14400000">4 hours</option><option value="28800000">8 hours</option><option value="86400000" selected>24 hours</option></select></label></div>
-      <div class="traffic-summary"><article><span>Received · into instances</span><b id="traffic-down">—</b></article><article><span>Sent · out of instances</span><b id="traffic-up">—</b></article><article class="access-stat"><span>HTTP requests</span><b id="access-count">Not configured</b><small id="access-source">Enable Caddy JSON access logs and map a log source to count requests.</small></article></div>
-      <div id="traffic-chart" class="traffic-chart" role="img" aria-label="Network traffic samples across selected time window"></div>
-      <div class="traffic-legend"><span><i class="down-dot"></i>Received</span><span><i class="up-dot"></i>Sent</span><span id="traffic-sampled">Waiting for first sample…</span></div>
-      <p class="telemetry-note">Counters are per-instance virtual NIC totals. The browser records the difference between samples; an instance reset, closed Incus page, or browser storage clear creates a gap. This is not router-wide or Internet usage.</p>
     </section>
 
     <details class="help"><summary>How this module accesses Incus</summary><p>This page runs inside Cockpit and calls the <code>incus</code> command through Cockpit’s process bridge. Commands run as the signed-in host account. The account needs permission to access Incus; use your normal administrator workflow to grant it. The module does not send host credentials to an external service.</p></details>
