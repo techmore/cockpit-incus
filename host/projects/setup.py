@@ -14,7 +14,7 @@ CONFIG = Path('/etc/cockpit-incus/projects.json')
 
 
 def command(args, password=None):
-    result = subprocess.run(['runuser', '-u', 'project-analytics', '--', '/usr/local/bin/goatcounter', 'db', '-db', 'sqlite+' + str(DB), *args],
+    result = subprocess.run(['runuser', '-u', 'project-analytics', '--', '/usr/local/bin/goatcounter', 'db', *args, '-db', 'sqlite+' + str(DB)],
         input=password, text=True, capture_output=True)
     if result.returncode:
         raise RuntimeError('GoatCounter provisioning failed: ' + result.stderr[-400:])
@@ -25,7 +25,7 @@ def main():
     apps = json.loads(CONFIG.read_text()).get('applications', [])
     ingest = {'sites': {}}
     if not DB.exists():
-        command(['-createdb', 'newdb'])
+        command(['newdb'])
     db = sqlite3.connect(DB)
     for app in apps:
         if not re.fullmatch(r'[a-z][a-z0-9-]{1,49}', app['id']):

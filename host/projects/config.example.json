@@ -14,7 +14,7 @@
       "analytics_vhosts": ["swartzit.analytics.internal"],
       "site_url": "https://swartzit.example.com/",
       "admin_url": "https://swartzit.example.com/admin",
-      "health_url": "https://swartzit.example.com/api/health",
+      "health_url": "https://swartzit.example.com/",
       "github_url": "https://github.com/owner/swartzit",
       "color": "#467b61"
     },
