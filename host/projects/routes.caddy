@@ -1,0 +1,8 @@
+# Import inside each registered application site block. Administration and
+# GoatCounter API routes remain private; only the script and relay are public.
+(project_analytics) {
+    @project_analytics path /project-analytics.js /project-analytics/collect
+    handle @project_analytics {
+        reverse_proxy 127.0.0.1:14381
+    }
+}

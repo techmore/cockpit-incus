@@ -1,0 +1,11 @@
+{
+  "version": 0,
+  "menu": {
+    "projects": {
+      "label": "Projects",
+      "order": 54,
+      "path": "index.html",
+      "keywords": [{"matches": ["projects", "visitors", "analytics", "traffic", "services", "deployments"], "weight": 10}]
+    }
+  }
+}

@@ -1,0 +1,19 @@
+[Unit]
+Description=Same-origin project analytics relay
+After=network.target project-analytics-goatcounter.service
+Requires=project-analytics-goatcounter.service
+
+[Service]
+User=project-analytics
+Group=project-analytics
+ExecStart=/usr/bin/python3 /usr/local/libexec/cockpit-incus/projects/ingest.py
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target

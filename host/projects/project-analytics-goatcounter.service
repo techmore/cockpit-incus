@@ -1,0 +1,20 @@
+[Unit]
+Description=Project visitor analytics (GoatCounter)
+After=network.target
+
+[Service]
+User=project-analytics
+Group=project-analytics
+WorkingDirectory=/var/lib/project-analytics
+ExecStart=/usr/local/bin/goatcounter serve -db sqlite+/var/lib/project-analytics/goatcounter.sqlite3 -listen 127.0.0.1:14380 -tls http -automigrate -store-every 10
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/project-analytics
+
+[Install]
+WantedBy=multi-user.target
