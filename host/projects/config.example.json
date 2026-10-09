@@ -30,7 +30,7 @@
       "analytics_vhosts": ["sonder.analytics.internal"],
       "site_url": "https://sonder.example.com/",
       "admin_url": "https://sonder.example.com/?settings=1",
-      "health_url": "https://sonder.example.com/api/health",
+      "health_url": "https://sonder.example.com/",
       "github_url": "https://github.com/owner/sonder",
       "color": "#836cbd"
     }

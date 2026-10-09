@@ -53,6 +53,10 @@ print(json.dumps({'runners_enabled':db.execute("SELECT count(*) FROM content_run
             data = json.loads(guest(app, ['/usr/local/bin/sonder', 'app', 'status', '--json', '--config', '/etc/sonder/server.json']))
             result['deployment'] = {'version': data.get('version'), 'commit': data.get('build'),
                                     'installed_at': (data.get('status', {}).get('state') or {}).get('processStartTime')}
+            runtime = data.get('status', {})
+            if not runtime.get('webHealthy') or not runtime.get('apiHealthy'):
+                result['health']['status'] = 'unhealthy'
+                result['health']['message'] = 'The installed web/API runtime is not ready'
     except Exception:
         result['details_unavailable'] = True
     return result

@@ -26,7 +26,7 @@
   function link(label, url) {
     try {
       const parsed = new URL(url);
-      if (!['https:', 'http:'].includes(parsed.protocol)) return null;
+      if (!['https:', 'http:'].includes(parsed.protocol) || parsed.username || parsed.password) return null;
       const a = node('a', label); a.href = parsed.href; a.target = '_blank'; a.rel = 'noopener noreferrer';
       return a;
     } catch { return null; }
