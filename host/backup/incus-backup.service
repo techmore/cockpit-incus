@@ -1,0 +1,9 @@
+[Unit]
+Description=Export Incus instances to the backup folder
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/incus-backup.sh
+Nice=19
+IOSchedulingClass=idle
+TimeoutStartSec=12h

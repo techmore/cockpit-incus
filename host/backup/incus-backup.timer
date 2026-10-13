@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly Incus instance export
+
+[Timer]
+OnCalendar=Sun *-*-* 03:30:00
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target
