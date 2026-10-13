@@ -2,8 +2,20 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="color-scheme" content="light dark">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Incus</title>
+  <script>
+    // Follow Cockpit's own light/dark choice (shared via localStorage 'shell:style'), else the system setting.
+    (function () {
+      const apply = () => {
+        let style = 'auto'; try { style = localStorage.getItem('shell:style') || 'auto'; } catch (e) {}
+        const dark = style === 'dark' || (style !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+      };
+      apply(); addEventListener('storage', apply); matchMedia('(prefers-color-scheme: dark)').addEventListener('change', apply);
+    })();
+  </script>
   <link rel="stylesheet" href="incus.css">
   <script src="../base1/cockpit.js"></script>
   <script src="incus.js" defer></script>
@@ -20,30 +32,31 @@
       <article class="stat"><span>Running</span><b id="stat-running">—</b></article>
       <article class="stat"><span>Stopped</span><b id="stat-stopped">—</b></article>
       <article class="stat"><span>Virtual machines</span><b id="stat-vms">—</b></article>
-    </section>
-
-    <section class="panel telemetry-panel">
-      <div class="panel-heading traffic-heading"><div><h2>Traffic & load</h2><p id="telemetry-status" class="collector-state">Connecting to host telemetry…</p></div><div class="traffic-controls"><label class="range-picker"><span>Chart</span><select id="traffic-view"><option value="requests">External requests</option><option value="http">External HTTP bytes</option><option value="network">Instance network bytes</option></select></label><label class="range-picker"><span>Window · applies to all tables</span><select id="traffic-window"><option value="300000">5 minutes</option><option value="900000">15 minutes</option><option value="1200000">20 minutes</option><option value="3600000">1 hour</option><option value="14400000">4 hours</option><option value="28800000">8 hours</option><option value="86400000" selected>24 hours</option></select></label></div></div>
-      <div class="traffic-summary"><article class="access-stat"><span>External HTTP requests</span><b id="access-count">—</b><small id="access-source">Waiting for access telemetry…</small></article><article><span>HTTP received · uploads</span><b id="http-down">—</b></article><article><span>HTTP sent · downloads</span><b id="http-up">—</b></article><article><span>5xx responses / average response</span><b id="http-errors">—</b></article><article><span>Instance NIC received · all projects</span><b id="traffic-down">—</b></article><article><span>Instance NIC sent · all projects</span><b id="traffic-up">—</b></article></div>
-      <div id="traffic-chart" class="traffic-chart" role="img" aria-label="External requests across selected time window"></div>
-      <div class="traffic-legend"><span><i class="down-dot"></i><span id="legend-down">External requests</span></span><span id="legend-up-wrapper" hidden><i class="up-dot"></i><span id="legend-up">Sent</span></span><span id="traffic-sampled">Waiting for host history…</span></div>
-      <p class="telemetry-note">Host collection continues with Cockpit closed. External includes public client addresses and explicitly configured public gateway ingress; gateway, direct public, local and unknown counts are shown separately. HTTP totals are completed requests and body bytes, including streams when they finish. NIC totals include internal traffic. HTTP windows use minute buckets; averages use available resource samples.</p>
+      <article class="stat" id="stat-unprotected-card"><span title="Instances with no snapshot and no recorded backup">No recovery point</span><b id="stat-unprotected">—</b></article>
     </section>
 
     <section class="panel">
-      <div class="panel-heading instance-heading"><div><h2>Instances</h2><p><span id="instance-metric-window">CPU / RAM averages</span> · disk files every 5 minutes; % estimates use configured size.</p></div><label class="search"><span class="sr-only">Filter instances and domains</span><input id="filter" type="search" placeholder="Filter by instance or domain…" autocomplete="off"></label></div>
+      <div class="panel-heading instance-heading"><div><h2>Instances</h2><p><span id="instance-metric-window">CPU / RAM averages</span> · configured size, domains and details are under Inspect.</p></div><label class="search"><span class="sr-only">Filter instances and domains</span><input id="filter" type="search" placeholder="Filter by instance or domain…" autocomplete="off"></label></div>
       <div id="notice" class="notice" role="status" hidden></div>
       <div id="empty" class="empty" hidden><span class="empty-mark">◇</span><b>No Incus instances yet</b><p>Launch your first container or virtual machine below.</p></div>
-      <div class="table-scroll"><table><thead><tr><th>Name</th><th>State</th><th>Type</th><th>Assigned specs</th><th>Live load</th><th>IPv4</th><th>Domains · published ports</th><th>Traffic · selected window</th><th class="actions-head">Actions</th></tr></thead><tbody id="instances"></tbody></table></div>
+      <div class="table-scroll"><table class="instances-table"><thead><tr><th>Instance</th><th>State</th><th>Recovery</th><th>Live load</th><th>Domains · published ports</th><th>Traffic · <span class="th-window">selected window</span></th><th class="actions-head">Actions</th></tr></thead><tbody id="instances"></tbody></table></div>
       <p id="no-match" class="no-match" hidden>No instances match that filter.</p>
     </section>
 
-    <section class="panel domains-panel">
-      <div class="panel-heading"><div><h2>Domains <small id="domain-count" class="domain-count">—</small></h2><p id="domains-source">Discovering Caddy routes…</p></div></div>
+    <section class="panel telemetry-panel">
+      <div class="panel-heading traffic-heading"><div><h2>Traffic & load</h2><p id="telemetry-status" class="collector-state">Connecting to host telemetry…</p></div><div class="traffic-controls"><label class="range-picker"><span>Chart shows</span><select id="traffic-view"><option value="requests">External requests</option><option value="http">External HTTP bytes</option><option value="network">Instance network bytes</option></select></label><label class="range-picker"><span>Show last</span><select id="traffic-window"><option value="300000">5 minutes</option><option value="900000">15 minutes</option><option value="1200000">20 minutes</option><option value="3600000">1 hour</option><option value="14400000">4 hours</option><option value="28800000">8 hours</option><option value="86400000" selected>24 hours</option></select></label></div></div>
+      <div class="traffic-summary"><article class="access-stat"><span>External HTTP requests</span><b id="access-count">—</b><small id="access-source">Waiting for access telemetry…</small></article><article><span>HTTP received · uploads</span><b id="http-down">—</b></article><article><span>HTTP sent · downloads</span><b id="http-up">—</b></article><article><span>5xx responses / average response</span><b id="http-errors">—</b></article><article><span>Instance NIC received · all projects</span><b id="traffic-down">—</b></article><article><span>Instance NIC sent · all projects</span><b id="traffic-up">—</b></article></div>
+      <div id="traffic-chart" class="traffic-chart" role="img" aria-label="External requests across selected time window"></div>
+      <div class="traffic-legend"><span><i class="down-dot"></i><span id="legend-down">External requests</span></span><span id="legend-up-wrapper" hidden><i class="up-dot"></i><span id="legend-up">Sent</span></span><span id="traffic-sampled">Waiting for host history…</span></div>
+      <details class="help"><summary>How these numbers are counted</summary><p>Host collection continues with Cockpit closed. External includes public client addresses and explicitly configured public gateway ingress; gateway, direct public, local and unknown counts are shown separately. HTTP totals are completed requests and body bytes, including streams when they finish. NIC totals include internal traffic. HTTP windows use minute buckets; averages use available resource samples.</p></details>
+    </section>
+
+    <details class="panel domains-panel">
+      <summary><div><h2>Domains <small id="domain-count" class="domain-count">—</small></h2><p id="domains-source">Discovering Caddy routes…</p></div></summary>
       <div class="table-scroll"><table class="domains-table"><thead><tr><th>Domain</th><th>Instance · route</th><th>DNS answers</th><th>External requests</th><th>HTTP received / sent</th><th>5xx / average response</th></tr></thead><tbody id="domains"></tbody></table></div>
       <p id="domains-empty" class="no-match">Domain inventory is not available yet.</p>
-      <p class="telemetry-note">Configured Caddy hostnames, including redirects. DNS aliases without a configured route cannot be discovered from this host alone. Requests follow their listener port to a guest. Shared listeners keep domain totals without assigning hits to one guest.</p>
-    </section>
+      <p class="section-note">Configured Caddy hostnames, including redirects. DNS aliases without a configured route cannot be discovered from this host alone. Shared listeners keep domain totals without assigning hits to one guest.</p>
+    </details>
 
     <section class="panel launch-panel">
       <div class="panel-heading"><div><span class="eyebrow">QUICK START</span><h2>Launch an instance</h2><p>Uses your host’s default Incus profile and network.</p></div></div>
@@ -58,6 +71,17 @@
 
     <details class="help"><summary>How this module accesses Incus</summary><p>This page runs inside Cockpit and calls the <code>incus</code> command through Cockpit’s process bridge. Commands run as the signed-in host account. The account needs permission to access Incus; use your normal administrator workflow to grant it. The module does not send host credentials to an external service.</p></details>
   </main>
+
+
+  <dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-title">
+    <form id="confirm-form" method="dialog">
+      <h2 id="confirm-title">Confirm</h2>
+      <p id="confirm-body"></p>
+      <ul id="confirm-list" hidden></ul>
+      <label id="confirm-type" hidden><span>Type <b id="confirm-name"></b> to confirm</span><input id="confirm-input" autocomplete="off" spellcheck="false"></label>
+      <div class="dialog-actions"><button type="button" id="confirm-cancel" class="button button-quiet">Cancel</button><button type="submit" id="confirm-ok" class="button button-primary">Confirm</button></div>
+    </form>
+  </dialog>
 
   <dialog id="deploy-dialog" class="deploy-dialog">
     <form id="deploy-form" method="dialog">

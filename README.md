@@ -31,6 +31,19 @@ GitHub deployments currently support public HTTPS repositories with a Dockerfile
 
 The module does not delete instances, enable privileged Incus containers, publish ports on all host interfaces, or configure host mounts.
 
+## Recovery column and theming
+
+Each instance row shows how recoverable it is, and the header tile **No recovery point** counts instances with nothing.
+
+- **Backup … ago** (green, amber after 8 days): an off-host backup recorded on the instance. Have the backup job record it:
+  `incus config set <instance> user.cockpit-incus.backup "$(date -Iseconds)"`.
+- **Snapshot … ago** (amber): an Incus snapshot exists, but it lives on the same drive, so it does not protect against a
+  drive failure. On a `dir` storage pool a snapshot is also a full copy of the instance's files; the Snapshot button says so.
+- **No backup** (red): neither exists.
+
+Stopping an instance that serves a domain asks you to type its name. The page follows Cockpit's light/dark setting
+(`shell:style`) or the system setting, uses at least 12 px text, and turns each row into a card on phone widths.
+
 ## Install for the signed-in user
 
 On the Incus host, check out this repository, then run:
