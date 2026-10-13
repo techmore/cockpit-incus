@@ -383,6 +383,7 @@
       type: String(item.type || 'container'),
       ipv4: findIPv4(item.state?.network) || item.expanded_devices?.eth0?.['ipv4.address'] || '',
       description: String(item.description || ''), group: itemConfig(item, 'user.cockpit-incus.deployment'),
+      snapshots: Array.isArray(item.snapshots) ? item.snapshots : [], offsite: String(itemConfig(item, 'user.cockpit-incus.backup') || ''),
       ports: getPortMappings(item), specs: assignedSpecs(item),
     };
   }
@@ -390,11 +391,37 @@
     const needle = filter.value.trim().toLowerCase();
     return instances.filter(item => `${item.name} ${item.group} ${item.ipv4} ${assignedDomains(item).map(domain => domain.name).join(' ')}`.toLowerCase().includes(needle));
   }
+  const DAY = 86_400_000;
+  function ageLabel(stamp) {
+    const days = Math.floor((Date.now() - stamp) / DAY);
+    return days <= 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`;
+  }
+  // Recovery state of one instance: an off-host backup (recorded in user.cockpit-incus.backup by the backup job)
+  // beats a snapshot, because snapshots live on the same disk as the instance.
+  function recoveryStatus(item) {
+    const offsite = Date.parse(item.offsite);
+    if (Number.isFinite(offsite)) {
+      const fresh = Date.now() - offsite <= 8 * DAY;
+      return { level: fresh ? 'ok' : 'local', label: `Backup ${ageLabel(offsite)}`, detail: fresh ? 'Off-host backup' : 'Backup is more than 8 days old',
+               title: 'Last off-host backup recorded in user.cockpit-incus.backup.' };
+    }
+    const stamps = item.snapshots.map(snapshot => Date.parse(snapshot.created_at)).filter(Number.isFinite);
+    if (stamps.length) {
+      const newest = Math.max(...stamps);
+      return { level: 'local', label: `Snapshot ${ageLabel(newest)}`, detail: 'Same disk only',
+               title: 'Snapshots live on the same drive as the instance, so they do not protect against a drive failure.' };
+    }
+    return { level: 'none', label: 'No backup', detail: 'No snapshot or backup recorded',
+             title: 'No snapshot exists and no off-host backup is recorded in user.cockpit-incus.backup.' };
+  }
   function updateStats() {
     $('#stat-total').textContent = instances.length;
     $('#stat-running').textContent = instances.filter(item => item.status.toLowerCase() === 'running').length;
     $('#stat-stopped').textContent = instances.filter(item => item.status.toLowerCase() === 'stopped').length;
     $('#stat-vms').textContent = instances.filter(item => item.type.toLowerCase().includes('virtual')).length;
+    const unprotected = instances.filter(item => recoveryStatus(item).level === 'none').length;
+    $('#stat-unprotected').textContent = unprotected;
+    $('#stat-unprotected-card').classList.toggle('stat-alert', unprotected > 0);
   }
   function makeAction(label, action, item, extraClass = '') {
     const button = document.createElement('button');
@@ -420,16 +447,15 @@
       const state = document.createElement('span'); const status = item.status.toLowerCase();
       state.className = `state ${status === 'running' ? 'state-running' : status === 'stopped' ? 'state-stopped' : 'state-error'}`;
       state.textContent = item.status; stateCell.append(state);
-      const typeCell = document.createElement('td'); const type = document.createElement('span');
-      type.className = 'type-pill'; type.textContent = item.type.toLowerCase().includes('virtual') ? 'Virtual machine' : 'Container'; typeCell.append(type);
-      const specsCell = document.createElement('td'); specsCell.className = 'specs-cell';
-      const cpu = document.createElement('span'); cpu.className = 'spec-value'; cpu.textContent = `CPU · ${item.specs.cpu}`;
-      const memory = document.createElement('span'); memory.className = 'spec-value'; memory.textContent = `RAM · ${item.specs.memory}`;
-      const disk = document.createElement('span'); disk.className = 'spec-value'; disk.textContent = `Disk · ${item.specs.disk}`;
-      const profile = document.createElement('small'); profile.className = 'spec-profile'; profile.textContent = `Profile · ${item.specs.profiles}`;
-      specsCell.append(cpu, memory, disk, profile);
+      const meta = document.createElement('div'); meta.className = 'instance-meta';
+      const type = document.createElement('span'); type.className = 'type-pill';
+      type.textContent = item.type.toLowerCase().includes('virtual') ? 'Virtual machine' : 'Container';
+      const ip = document.createElement('span'); ip.className = 'ip'; ip.textContent = item.ipv4 || 'no address';
+      meta.append(type, ip); nameCell.append(meta);
+      const recoveryCell = document.createElement('td'); const recovery = recoveryStatus(item);
+      const recoveryBox = document.createElement('div'); recoveryBox.className = `recovery recovery-${recovery.level}`; recoveryBox.title = recovery.title;
+      recoveryBox.append(textElement('b', recovery.label), textElement('small', recovery.detail)); recoveryCell.append(recoveryBox);
       const loadCell = liveLoadCell(item);
-      const ipCell = document.createElement('td'); ipCell.className = 'ip'; ipCell.textContent = item.ipv4 || '—';
       const portsCell = document.createElement('td'); portsCell.className = 'ports-cell';
       const domains = assignedDomains(item);
       domains.forEach(domain => {
@@ -449,7 +475,9 @@
       actions.append(makeAction('Inspect', inspectInstance, item));
       if (status === 'running') { actions.append(makeAction('Snapshot', snapshotInstance, item)); actions.append(makeAction('Stop', changeState, item, 'action-danger')); }
       else if (status === 'stopped') actions.append(makeAction('Start', changeState, item));
-      actionCell.append(actions); row.append(nameCell, stateCell, typeCell, specsCell, loadCell, ipCell, portsCell, trafficCell(item), actionCell); instanceBody.append(row);
+      actionCell.append(actions); row.append(nameCell, stateCell, recoveryCell, loadCell, portsCell, trafficCell(item), actionCell);
+      ['Instance', 'State', 'Recovery', 'Live load', 'Domains', 'Traffic', ''].forEach((label, index) => { row.children[index].dataset.label = label; });
+      instanceBody.append(row);
     });
   }
   async function refresh({ sample = true } = {}) {
@@ -491,10 +519,39 @@
       delete pendingProxies[name];
     }
   }
+  function confirmAction({ title, body, details = [], confirmLabel, danger = false, typeName = '' }) {
+    return new Promise(resolve => {
+      const dialog = $('#confirm-dialog'), ok = $('#confirm-ok'), cancel = $('#confirm-cancel'), input = $('#confirm-input'), form = $('#confirm-form');
+      $('#confirm-title').textContent = title; $('#confirm-body').textContent = body;
+      const list = $('#confirm-list'); list.replaceChildren(); list.hidden = details.length === 0;
+      details.forEach(entry => list.append(textElement('li', entry.text || entry, entry.warn ? 'warn' : '')));
+      $('#confirm-type').hidden = !typeName; $('#confirm-name').textContent = typeName; input.value = '';
+      ok.textContent = confirmLabel; ok.className = `button ${danger ? 'button-danger' : 'button-primary'}`; ok.disabled = Boolean(typeName);
+      const onInput = () => { ok.disabled = Boolean(typeName) && input.value.trim() !== typeName; };
+      const finish = value => { cleanup(); if (dialog.open) dialog.close(); resolve(value); };
+      const onSubmit = event => { event.preventDefault(); if (!ok.disabled) finish(true); };
+      const onCancel = event => { event.preventDefault(); finish(false); };
+      const cleanup = () => { input.removeEventListener('input', onInput); form.removeEventListener('submit', onSubmit); cancel.removeEventListener('click', onCancel); dialog.removeEventListener('cancel', onCancel); };
+      input.addEventListener('input', onInput); form.addEventListener('submit', onSubmit); cancel.addEventListener('click', onCancel); dialog.addEventListener('cancel', onCancel);
+      dialog.showModal(); (typeName ? input : cancel).focus();
+    });
+  }
+  async function poolDriver(pool) {
+    if (!pool) return '';
+    try { return parseJson(await runIncus(['storage', 'list', '--format=json'], 10_000, null), []).find(entry => entry.name === pool)?.driver || ''; }
+    catch { return ''; }
+  }
   async function changeState(item) {
     if (busy) return;
     const running = item.status.toLowerCase() === 'running';
-    if (!window.confirm(`${running ? 'Stop' : 'Start'} “${item.name}”?`)) return;
+    const serving = assignedDomains(item).map(domain => domain.name).concat(item.ports.filter(port => port.publicUrl).map(port => port.url));
+    const approved = await confirmAction(running ? {
+      title: `Stop “${item.name}”?`,
+      body: 'The instance is shut down gracefully (up to 60 seconds) and stays stopped until you start it again.',
+      details: serving.length ? [{ text: `It is serving ${serving.join(', ')}. Those sites go offline until it is started.`, warn: true }] : [],
+      confirmLabel: 'Stop instance', danger: true, typeName: serving.length ? item.name : '',
+    } : { title: `Start “${item.name}”?`, body: 'The instance is started with its saved configuration.', confirmLabel: 'Start instance' });
+    if (!approved) return;
     try {
       busy = true; showNotice(`${running ? 'Stopping' : 'Starting'} ${item.name}…`);
       await runIncus(running ? ['stop', item.name, '--timeout=60'] : ['start', item.name]);
@@ -505,8 +562,11 @@
   async function snapshotInstance(item) {
     if (busy) return;
     const snapshot = `before-change-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 16)}`;
-    if (!window.confirm(`Create snapshot “${snapshot}” for “${item.name}”?`)) return;
-    try { busy = true; showNotice(`Creating snapshot for ${item.name}…`); await runIncus(['snapshot', 'create', item.name, snapshot]); showNotice(`Snapshot created: ${item.name}/${snapshot}`); }
+    const driver = await poolDriver(item.specs.pool);
+    const details = [{ text: 'Snapshots stay on the same drive as the instance. They help with mistakes, not with a drive failure.', warn: false }];
+    if (driver === 'dir') details.push({ text: 'This storage pool uses the “dir” driver, so a snapshot is a full copy of the instance’s files and takes as much space as the instance itself.', warn: true });
+    if (!await confirmAction({ title: `Snapshot “${item.name}”?`, body: `Creates the snapshot “${snapshot}”.`, details, confirmLabel: 'Create snapshot' })) return;
+    try { busy = true; showNotice(`Creating snapshot for ${item.name}…`); await runIncus(['snapshot', 'create', item.name, snapshot]); await refresh(); showNotice(`Snapshot created: ${item.name}/${snapshot}`); }
     catch (error) { showNotice(error.message || `Could not snapshot ${item.name}.`, true); }
     finally { busy = false; }
   }
